@@ -668,8 +668,355 @@ textarea.input {
   margin: 0;
 }
 
+.spinner--small {
+  width: 14px;
+  height: 14px;
+}
+
 .paypal-slot {
   max-width: 420px;
+}
+
+/* Shared bits for the job pages */
+.stack--tight {
+  gap: 6px;
+}
+
+.job-meta {
+  color: var(--ink-soft);
+}
+
+.label {
+  margin-bottom: 4px;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prewrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.field__error {
+  color: var(--bad-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--bad-ink);
+}
+
+.card--held {
+  border-color: #bcd0ec;
+  background: linear-gradient(180deg, var(--held-bg), var(--surface) 80%);
+}
+
+.card--warn {
+  border-color: #ecd49a;
+  background: linear-gradient(180deg, var(--warn-bg), var(--surface) 80%);
+}
+
+.card--quiet {
+  padding: 18px;
+}
+
+.notice {
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: 0.9rem;
+}
+
+/* Job status page */
+.job-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.job-page h1 {
+  margin: 0;
+}
+
+.job-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 24px;
+}
+
+@media (max-width: 880px) {
+  .job-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+/* Progress grows with transform, not width, so it stays on the GPU. */
+.progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(31 76 134 / 0.15);
+}
+
+.progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--held-ink);
+  transform-origin: left;
+  transition: transform 300ms var(--ease-out);
+}
+
+/* The payout moment */
+.settled {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settled__amount {
+  color: var(--good-ink);
+  font-size: clamp(2.25rem, 6vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.settled__line {
+  margin-bottom: 6px;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+/* Checklist results. A row's color shifts as its result lands; the icon swaps in
+   with a short scale-and-fade (it's remounted per status). */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+.result--checking {
+  border-color: #bcd0ec;
+}
+
+.result--pass {
+  border-color: #a9dcbf;
+  background: #f3fbf6;
+}
+
+.result--fail {
+  border-color: #efb9b1;
+  background: #fdf5f4;
+}
+
+.result--unsure {
+  border-color: #ecd49a;
+  background: #fffaf0;
+}
+
+.status-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--neutral-bg);
+  color: var(--neutral-ink);
+  font-weight: 700;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.status-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.status-icon--pending::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.status-icon--checking { background: var(--held-bg); }
+.status-icon--pass { background: var(--brand); color: var(--on-brand); }
+.status-icon--fail { background: var(--bad-ink); color: #ffffff; }
+.status-icon--unsure { background: #d39b1b; color: #ffffff; }
+
+.result__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.result__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.result__text {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.result__weight {
+  flex-shrink: 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 0.85rem;
+}
+
+.result__meta .muted {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.result__reasoning {
+  font-size: 0.925rem;
+}
+
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.evidence__shot {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.evidence__shot img {
+  max-width: 100%;
+  height: 160px;
+  object-fit: contain;
+  background: var(--paper);
+}
+
+.evidence__link {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* Details and activity in the side column */
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.details dd {
+  margin: 0;
+}
+
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.activity__item--money {
+  border-left-color: var(--brand);
+}
+
+.activity__message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity__time {
+  flex-shrink: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .paypal-slot[aria-busy='true'] {
@@ -769,6 +1116,16 @@ textarea.input {
 
   .checklist-editor__item {
     animation-name: item-fade;
+  }
+
+  .status-icon {
+    @starting-style {
+      transform: none;
+    }
+  }
+
+  .progress__bar {
+    transition-duration: 0ms;
   }
 
   .spinner {

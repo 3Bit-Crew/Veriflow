@@ -36,21 +36,20 @@ const roundDown2 = (n) => Math.floor(n * 100 + 1e-9) / 100;
 
 // ---- Storage ----------------------------------------------------------------------------
 
-let memory = null; // used when localStorage is unavailable
+let memory = null; // the working copy; the only copy when localStorage is unavailable
 
+// Re-reads localStorage on every call instead of caching it, so two tabs (say the buyer's
+// status page and the worker's submit page) see each other's changes instead of
+// overwriting them with a stale copy.
 function loadState() {
-  if (memory) return memory;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      memory = JSON.parse(saved);
-      return memory;
-    }
+    memory = saved ? JSON.parse(saved) : buildSeedState();
+    if (!saved) saveState();
   } catch {
-    // Blocked storage or unreadable data: start again from the sample jobs.
+    // Blocked storage or unreadable data: carry on in memory from the sample jobs.
+    memory ??= buildSeedState();
   }
-  memory = buildSeedState();
-  saveState();
   return memory;
 }
 
@@ -111,14 +110,29 @@ function touch(job) {
   job.updatedAt = new Date().toISOString();
 }
 
-// A small placeholder image, standing in for a stored screenshot.
-function placeholderScreenshot(label) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300">
-    <rect width="480" height="300" fill="#e7ece9"/>
-    <text x="240" y="155" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#5b6b64">${label}</text>
+// A drawn stand-in for a stored screenshot: a simple signup page, with the button
+// running off the right edge on mobile (the demo's broken layout).
+function placeholderScreenshot(viewport) {
+  const mobile = viewport !== 'desktop';
+  const w = mobile ? 260 : 480;
+  const h = mobile ? 440 : 300;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <rect width="${w}" height="${h}" fill="#fffaf3"/>
+    <rect width="${w}" height="44" fill="#3b2a1e"/>
+    <text x="16" y="28" font-family="sans-serif" font-size="15" font-weight="700" fill="#fffaf3">Bakery</text>
+    <text x="16" y="96" font-family="sans-serif" font-size="${mobile ? 22 : 28}" font-weight="700" fill="#3b2a1e">Fresh every morning</text>
+    <rect x="16" y="120" width="${w * 0.7}" height="10" rx="5" fill="#e8dccd"/>
+    <rect x="16" y="140" width="${w * 0.5}" height="10" rx="5" fill="#e8dccd"/>
+    <rect x="16" y="176" width="${mobile ? 150 : 260}" height="40" rx="6" fill="#ffffff" stroke="#cdbba5"/>
+    <text x="28" y="201" font-family="sans-serif" font-size="13" fill="#9b8a77">you@example.com</text>
+    <rect x="${mobile ? 176 : 290}" y="176" width="120" height="40" rx="6" fill="#c2410c"/>
+    <text x="${mobile ? 206 : 320}" y="201" font-family="sans-serif" font-size="14" font-weight="700" fill="#ffffff">Sign up</text>
+    <text x="${w - 8}" y="${h - 10}" font-family="sans-serif" font-size="11" text-anchor="end" fill="#9b8a77">Sample screenshot · ${mobile ? '390px' : '1280px'}</text>
   </svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  return URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
 }
+
+const screenshotUrls = {};
 
 // ---- Simulated checker ------------------------------------------------------------------
 
@@ -608,6 +622,10 @@ export function reviewJob(id, payoutAmount) {
 
 const newestFirst = (a, b) => b.createdAt.localeCompare(a.createdAt);
 
+// Events logged in the same millisecond keep their real order: reverse first, and the
+// stable sort leaves the later one on top.
+const eventsNewestFirst = (events) => [...events].reverse().sort(newestFirst);
+
 export function getJobs() {
   return call((state) => [...state.jobs].sort(newestFirst));
 }
@@ -615,19 +633,21 @@ export function getJobs() {
 export function getJob(id) {
   return call((state) => {
     const job = findJob(state, id);
-    return { job, events: state.events.filter((e) => e.jobId === id).sort(newestFirst) };
+    return { job, events: eventsNewestFirst(state.events.filter((e) => e.jobId === id)) };
   });
 }
 
 export function getEvents() {
   return call((state) =>
-    [...state.events].sort(newestFirst).map((event) => ({
+    eventsNewestFirst(state.events).map((event) => ({
       ...event,
       jobTitle: state.jobs.find((j) => j._id === event.jobId)?.title,
     })),
   );
 }
 
+// A blob URL (not a data: URL) so the screenshot can also open in a new tab.
 export function screenshotUrl(id) {
-  return placeholderScreenshot(`Sample screenshot (${String(id).replace('fake-', '')})`);
+  screenshotUrls[id] ??= placeholderScreenshot(String(id).replace('fake-', ''));
+  return screenshotUrls[id];
 }
