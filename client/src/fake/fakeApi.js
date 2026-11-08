@@ -446,8 +446,8 @@ function buildSeedState() {
 
 // Runs a call like a network request: after a short delay, against up-to-date state,
 // returning a copy so pages can't change the stored data by accident.
-async function call(handler) {
-  await new Promise((resolve) => setTimeout(resolve, LATENCY_MS));
+async function call(handler, latency = LATENCY_MS) {
+  await new Promise((resolve) => setTimeout(resolve, latency));
   const state = loadState();
   advance(state);
   const result = handler(state);
@@ -507,7 +507,7 @@ export function generateChecklist(id) {
     touch(job);
     addEvent(state, job._id, 'CHECKLIST_GENERATED', `AI wrote ${job.items.length} checklist items`);
     return job;
-  });
+  }, 1200); // the real AI call takes a few seconds; this keeps the loading state visible
 }
 
 // The same rules the server applies, see findChecklistProblems in server/src/ai/checklistRules.js.

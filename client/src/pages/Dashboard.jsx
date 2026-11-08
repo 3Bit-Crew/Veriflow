@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getJobs } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
+import { formatMoney } from '../format.js';
 
 // A plain list for now. The AG Grid tables replace it in a later phase.
 export default function Dashboard() {
@@ -29,7 +30,7 @@ export default function Dashboard() {
           {jobs.map((job) => (
             <li key={job._id}>
               <Link to={`/jobs/${job._id}`}>{job.title}</Link>
-              <span className="job-list__amount">${job.amount.toFixed(2)}</span>
+              <span className="job-list__amount">{formatMoney(job.amount, job.currency)}</span>
               <StatusBadge status={job.status} />
             </li>
           ))}
