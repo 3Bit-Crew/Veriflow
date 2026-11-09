@@ -7,7 +7,11 @@ import paypalRoutes from './routes/paypal.js';
 import eventRoutes from './routes/events.js';
 import screenshotRoutes from './routes/screenshots.js';
 
+import dns from 'node:dns';
 dotenv.config({ quiet: true });
+// Some internet providers' DNS blocks MongoDB Atlas lookups (querySrv ECONNREFUSED).
+// Set DNS_SERVERS=8.8.8.8,1.1.1.1 in .env to use public DNS instead. Must come after dotenv.config().
+if (process.env.DNS_SERVERS) dns.setServers(process.env.DNS_SERVERS.split(',').map((s) => s.trim()));
 
 const app = express();
 const PORT = process.env.PORT || 5000;
