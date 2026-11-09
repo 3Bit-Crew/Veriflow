@@ -2,6 +2,11 @@ import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
+import jobRoutes from './routes/jobs.js';
+import paypalRoutes from './routes/paypal.js';
+import eventRoutes from './routes/events.js';
+import screenshotRoutes from './routes/screenshots.js';
+
 import dns from 'node:dns';
 dotenv.config({ quiet: true });
 // Some internet providers' DNS blocks MongoDB Atlas lookups (querySrv ECONNREFUSED).
@@ -18,7 +23,10 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
 });
 
-// Routes go here (day 2): /api/jobs, /api/paypal, /api/screenshots
+app.use('/api/jobs', jobRoutes);
+app.use('/api/paypal', paypalRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/screenshots', screenshotRoutes);
 
 // Unknown routes
 app.use((req, res) => {
@@ -27,8 +35,10 @@ app.use((req, res) => {
 
 // Errors are always { error: "message" } (see PLAN.md 5.8)
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(err.status || 500).json({ error: err.message || 'Server error' });
+  let status = err.status || err.statusCode || 500;
+  if (err.name === 'ValidationError' || err.name === 'CastError') status = 400; // bad input caught by Mongoose
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: err.message || 'Server error' });
 });
 
 async function start() {

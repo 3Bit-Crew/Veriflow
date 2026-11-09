@@ -1,4 +1,5 @@
 import { logEvent } from '../events.js';
+import { captureAuthorization, voidAuthorization, money } from './orders.js';
 
 // Round DOWN to 2 decimals: 133.339 -> 133.33 (PLAN.md 5.5)
 export function roundDown2(n) {
@@ -6,12 +7,13 @@ export function roundDown2(n) {
 }
 
 // Pays the worker and closes the job. This is the ONLY place a job becomes SETTLED.
-//   amount > 0  -> capture that amount (FULL if it's the whole job amount, else PARTIAL)
-//   amount == 0 -> void (buyer gets all the money back)
-// Returns the updated job.
+//   amount > 0  -> capture that amount from the PayPal hold (FULL or PARTIAL),
+//                  the rest of the hold goes back to the buyer
+//   amount == 0 -> void the hold (buyer gets all the money back)
+// Returns the updated job. Throws if PayPal fails (the job is then NOT settled).
 //
-// PLACEHOLDER (day 1): it does not call PayPal yet. It only updates the database
-// so B's loop and C's pages can be built and tested. Day 2 adds the real PayPal calls.
+// Testing without PayPal: if PAYPAL_MOCK=true in .env AND the job has no paypalAuthId
+// (e.g. a fake job made by a test script), the PayPal call is skipped.
 export async function settleJob(job, amount) {
   if (job.status === 'SETTLED') {
     throw new Error(`Job ${job._id} is already settled`);
@@ -27,20 +29,48 @@ export async function settleJob(job, amount) {
   else if (payout === job.amount) settlement = 'FULL';
   else settlement = 'PARTIAL';
 
-  // TODO day 2: real PayPal calls using job.paypalAuthId
-  //   capture: POST /v2/payments/authorizations/{authId}/capture
-  //            { amount: { currency_code, value: payout.toFixed(2) }, final_capture: true }
-  //   void:    POST /v2/payments/authorizations/{authId}/void
+  const mock = !job.paypalAuthId && process.env.PAYPAL_MOCK === 'true';
+  if (!job.paypalAuthId && !mock) {
+    throw new Error(`Job ${job._id} has no PayPal authorization, so it can't be settled`);
+  }
 
+  // 1. Move the money (PayPal). If this fails, stop: the job stays as it was.
+  let paypalResult = null;
+  if (!mock) {
+    try {
+      // Same request id on a retry -> PayPal won't capture/void twice
+      const requestId = `settle-${job._id}-${job.paypalAuthId}`;
+      paypalResult = settlement === 'VOID'
+        ? await voidAuthorization(job.paypalAuthId, requestId)
+        : await captureAuthorization(job.paypalAuthId, payout, job.currency, requestId);
+    } catch (err) {
+      if (settlement === 'VOID' && err.message.includes('PERMISSION_DENIED')) {
+        // PayPal only lets an app void holds whose payee is the app's own business account
+        err.message += `. Void only works when workerEmail (${job.workerEmail}) is the sandbox business account that owns the PayPal app`;
+      }
+      await logEvent(job._id, 'ERROR', `PayPal ${settlement === 'VOID' ? 'void' : 'capture'} failed: ${err.message}`, err.paypal);
+      throw err;
+    }
+  }
+
+  // 2. Save the result on the job
   job.payoutAmount = payout;
   job.settlement = settlement;
   job.status = 'SETTLED';
   await job.save();
 
+  // 3. Write it in the audit log
+  const note = mock ? ' (mock, no PayPal call)' : '';
   if (settlement === 'VOID') {
-    await logEvent(job._id, 'PAYPAL_VOIDED', `Payment voided. ${job.currency} ${job.amount.toFixed(2)} returned to buyer (placeholder, no PayPal call yet)`);
+    await logEvent(job._id, 'PAYPAL_VOIDED',
+      `Payment voided. ${job.currency} ${money(job.amount)} returned to buyer${note}`,
+      { authId: job.paypalAuthId, status: paypalResult?.status });
   } else {
-    await logEvent(job._id, 'PAYPAL_CAPTURED', `Captured ${job.currency} ${payout.toFixed(2)} of ${job.amount.toFixed(2)} (${settlement}, placeholder, no PayPal call yet)`, { payout, settlement });
+    const returned = money(job.amount - payout);
+    await logEvent(job._id, 'PAYPAL_CAPTURED',
+      `Paid worker ${job.currency} ${money(payout)} of ${money(job.amount)} (${settlement})` +
+      (settlement === 'PARTIAL' ? `, ${returned} returned to buyer` : '') + note,
+      { payout, settlement, captureId: paypalResult?.id, status: paypalResult?.status });
   }
 
   return job;
