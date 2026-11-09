@@ -14,6 +14,68 @@ export const ALLOWED_KINDS = {
 
 export const MAX_ITEMS = 8;
 
+// Code jobs: the worker must not edit the buyer's tests or CI setup to make them "pass".
+// A rule ending in "/" = whole folder (from the repo root). A rule starting with "*" = file name ending.
+export const PROTECTED_PATHS = [
+  ".github/",
+  "test/",
+  "tests/",
+  "__tests__/",
+  "spec/",
+  "*.test.js",
+  "*.spec.js",
+  "*.test.ts",
+  "*.spec.ts",
+];
+export const PROTECT_TESTS_TEXT =
+  "The buyer's tests and CI setup were not modified";
+
+/**
+ * Does a changed file match a rule path?
+ *   "src/db/"   → anything inside that folder (from the repo root)
+ *   "*.test.js" → any file whose name ends with ".test.js"
+ *   "src/a.js"  → exactly that file
+ */
+export function pathMatches(file, rule) {
+  const clean = (p) => String(p).trim().replace(/^\.?\//, "");
+  const f = clean(file);
+  const r = clean(rule);
+  if (r.startsWith("*")) return f.endsWith(r.slice(1));
+  return r.endsWith("/") ? f.startsWith(r) : f === r;
+}
+
+// Adds the "don't edit the tests" item to a code checklist, unless:
+// - an item already protects .github/ (AI or buyer added it), or
+// - the job itself asks to change tests (mustTouch on a test path) → those paths are left out.
+function addTestProtection(items) {
+  const alreadyThere = items.some(
+    (i) =>
+      i.kind === "files_changed" &&
+      i.params.mustNotTouch.some((p) => pathMatches(".github/x", p)),
+  );
+  if (alreadyThere) return items;
+
+  const touched = items.flatMap((i) =>
+    i.kind === "files_changed" ? i.params.mustTouch : [],
+  );
+  const protect = PROTECTED_PATHS.filter(
+    (rule) =>
+      !touched.some(
+        (t) => t === rule || pathMatches(t, rule) || pathMatches(rule, t),
+      ),
+  );
+  if (protect.length === 0) return items;
+
+  const item = {
+    text: PROTECT_TESTS_TEXT,
+    kind: "files_changed",
+    params: { mustTouch: [], mustNotTouch: protect },
+    weight: 10,
+  };
+  // Right after tests_pass, so the MAX_ITEMS cut never drops it.
+  return [items[0], item, ...items.slice(1)];
+}
+
 const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
 const cleanPathList = (list) =>
   Array.isArray(list) ? list.filter(isNonEmptyString).map((p) => p.trim()) : [];
@@ -134,6 +196,7 @@ export function validateAndFixItems(type, items) {
         weight: 50,
       },
     );
+    cleaned = addTestProtection(cleaned);
   }
 
   cleaned = cleaned.slice(0, MAX_ITEMS);

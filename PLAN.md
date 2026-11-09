@@ -239,7 +239,8 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 - Use an exact check whenever possible. Use `visual` only for things like "looks good on mobile" or "matches the brand colors".
 - Every code job must include exactly one `tests_pass` item.
 - Weights are whole numbers and must add up to **100**. The route rejects the checklist otherwise.
-- `mustTouch` / `mustNotTouch` paths: a path ending in `/` means "anything in that folder".
+- `mustTouch` / `mustNotTouch` paths: a path ending in `/` means "anything in that folder" (from the repo root). A path starting with `*` means "any file whose name ends with this", e.g. `*.test.js`.
+- **Test protection (added automatically to every code job):** a `files_changed` item "The buyer's tests and CI setup were not modified" with `mustNotTouch: [".github/", "test/", "tests/", "__tests__/", "spec/", "*.test.js", "*.spec.js", "*.test.ts", "*.spec.ts"]`. This stops a worker from editing the tests to make them pass. If the job itself asks to change tests (a `mustTouch` on a test path), those paths are left out. The buyer can still delete the item in the editor.
 
 ### 5.4 Checker result (every checker returns this, one per item)
 ```json
@@ -254,7 +255,8 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 - `status` is one of `PASS`, `FAIL`, `UNSURE`.
 - Exact checks always return `confidence: 1.0`.
 - **If a checker crashes or times out, it returns `UNSURE` with the error in `reasoning`. It never throws an error up to the loop.**
-- **GitHub checks still running:** if the PR's checks haven't finished, `checkers/github.js` returns `null` instead of a result. The loop puts the job back to `SUBMITTED` and tries again next round. After **5 minutes** of waiting, it returns `UNSURE`.
+- **GitHub checks still running:** `checkCodeJob(job, { timedOut })` returns `null` if the PR's checks haven't finished (or haven't started). The loop puts the job back to `SUBMITTED` and tries again next round. After **5 minutes** of waiting, the loop calls it with `timedOut: true`, and still-running tests become `UNSURE`.
+- **Checkers don't use the database.** `checkWebsiteJob(job)` returns `{ results, screenshots: { desktop, mobile } }` (JPEG buffers). `loop.js` saves the screenshots as `Screenshot` documents and puts their ids in `evidence.screenshots`.
 
 ### 5.5 Decision rule (`server/src/decision.js`, owned by B)
 B's loop runs this after all items are checked, then acts on the result.
@@ -352,7 +354,7 @@ Fill in names:
 - `ai/index.js`: `generateJSON` (Gemini, Groq backup) + `judgeImages` (Gemini)
 - `ai/checklist.js`: `generateChecklist(job)` following all rules in 5.3
 - `checkers/github.js`: from the PR URL, read check runs → `tests_pass`; read changed files → `files_changed`. Returns `null` while checks are still running.
-- `checkers/website.js`: Playwright, desktop (1280px) and mobile (390px) screenshots saved as `Screenshot` documents, plus `page_loads` / `element_exists` / `text_present`
+- `checkers/website.js`: Playwright, desktop (1280px) and mobile (390px) screenshots (returned as buffers; `loop.js` saves them as `Screenshot` documents), plus `page_loads` / `element_exists` / `text_present`
 - `checkers/visual.js`: send the right screenshot + item text to `judgeImages` → result
 - `checkers/speed.js` (should-have): PageSpeed Insights → `speed_score`
 - `decision.js`: rule 5.5
