@@ -2,8 +2,11 @@ import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
-
+import dns from 'node:dns';
 dotenv.config({ quiet: true });
+// Some internet providers' DNS blocks MongoDB Atlas lookups (querySrv ECONNREFUSED).
+// Set DNS_SERVERS=8.8.8.8,1.1.1.1 in .env to use public DNS instead. Must come after dotenv.config().
+if (process.env.DNS_SERVERS) dns.setServers(process.env.DNS_SERVERS.split(',').map((s) => s.trim()));
 
 const app = express();
 const PORT = process.env.PORT || 5000;
