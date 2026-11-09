@@ -54,10 +54,25 @@ const loaded = (s) => s.status !== null && s.status >= 200 && s.status < 400;
 
 // ---------- the three checks ----------
 
+// Paths in the checklist are relative to the SUBMITTED page, not the domain root.
+// So for https://h.github.io/demo/good/ :
+//   "/"      → https://h.github.io/demo/good/        (the submitted page itself)
+//   "/about" → https://h.github.io/demo/good/about
+export function resolvePagePath(baseUrl, path = '/') {
+  const rest = String(path).trim().replace(/^\/+/, '');
+  if (!rest) return baseUrl;
+  const base = new URL(baseUrl);
+  base.search = '';
+  base.hash = '';
+  // "…/good" (a folder without the final slash) → "…/good/", but keep "…/index.html" as a file.
+  const lastPart = base.pathname.split('/').pop();
+  if (lastPart && !lastPart.includes('.')) base.pathname += '/';
+  return new URL(rest, base).href;
+}
+
 async function checkPageLoads(context, baseUrl, main, item, idx) {
-  const path = item.params?.path || '/';
-  const target = new URL(path, baseUrl).href;
-  const sameAsMain = new URL(target).pathname === new URL(baseUrl).pathname;
+  const target = resolvePagePath(baseUrl, item.params?.path || '/');
+  const sameAsMain = target === baseUrl;
 
   let res = main.desktop;
   if (!sameAsMain) {
