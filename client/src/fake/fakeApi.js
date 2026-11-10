@@ -9,6 +9,7 @@
 //   title has "review"   an item comes back UNSURE -> NEEDS_REVIEW
 //   title has "partial"  the same item fails on both tries -> PARTIAL
 //   title has "void"     everything fails on both tries -> VOID
+//   title has "batch"    all results land at once, like the real GitHub checker (combines with the above)
 
 const STORAGE_KEY = 'veriflow.fakeApi.v1';
 const STEP_MS = 1500; // time between each simulated check
@@ -252,11 +253,14 @@ function stepChecker(state, job, sim) {
     return false;
   }
 
-  const item = job.items[sim.index];
-  Object.assign(item, resultFor(job, sim.index));
+  const count = job.title.toLowerCase().includes('batch') ? job.items.length - sim.index : 1;
+  for (let k = 0; k < count; k += 1) {
+    const item = job.items[sim.index];
+    Object.assign(item, resultFor(job, sim.index));
+    addEvent(state, job._id, 'CHECK_RESULT', `${item.status}: ${item.text}`, { itemId: item._id, status: item.status });
+    sim.index += 1;
+  }
   touch(job);
-  addEvent(state, job._id, 'CHECK_RESULT', `${item.status}: ${item.text}`, { itemId: item._id, status: item.status });
-  sim.index += 1;
 
   if (sim.index < job.items.length) return false;
   decide(state, job);

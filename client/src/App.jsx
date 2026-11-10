@@ -1,10 +1,13 @@
+import { lazy, Suspense } from 'react';
 import { Link, NavLink, Route, Routes } from 'react-router-dom';
 import { isFakeApi, resetFakeData } from './api.js';
 import Landing from './pages/Landing.jsx';
 import NewJob from './pages/NewJob.jsx';
 import Submit from './pages/Submit.jsx';
 import JobStatus from './pages/JobStatus.jsx';
-import Dashboard from './pages/Dashboard.jsx';
+
+// AG Grid is large, so the dashboard loads only when it's opened.
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 
 function handleReset() {
   resetFakeData();
@@ -50,7 +53,14 @@ export default function App() {
           <Route path="/jobs/new" element={<NewJob />} />
           <Route path="/jobs/:id/submit" element={<Submit />} />
           <Route path="/jobs/:id" element={<JobStatus />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route
+            path="/dashboard"
+            element={
+              <Suspense fallback={<section className="page"><p className="muted">Loading the dashboard…</p></section>}>
+                <Dashboard />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
