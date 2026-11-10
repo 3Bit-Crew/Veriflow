@@ -2,13 +2,15 @@
 // Pure function: no database. loop.js saves the results and the screenshots.
 //
 //   checkWebsiteJob(job)
-//     → { results, screenshots }
-//       results:     one per page_loads / element_exists / text_present item (PLAN 5.4 shape)
-//       screenshots: { desktop: Buffer|null, mobile: Buffer|null }  (JPEG)
+//     → { results, screenshots, interactions }
+//       results:      one per page_loads / element_exists / text_present item (PLAN 5.4 shape)
+//       screenshots:  { desktop: Buffer|null, mobile: Buffer|null }  (JPEG)
+//       interactions: one { result, shot } per "interaction" item (interaction.js), shot = page after the steps
 //
 // "visual" and "speed_score" items are NOT handled here (visual.js and speed.js do those).
 // It never throws: any problem becomes an UNSURE result.
 import { chromium } from 'playwright';
+import { checkInteractionItem } from './interaction.js';
 
 export const WEBSITE_KINDS = ['page_loads', 'element_exists', 'text_present'];
 
@@ -124,9 +126,15 @@ async function checkText(pages, item, idx) {
 
 /** @param {object} job  needs: submissionUrl (website URL), items[] */
 export async function checkWebsiteJob(job) {
-  const items = (job.items || []).map((item, idx) => ({ item, idx })).filter(({ item }) => WEBSITE_KINDS.includes(item.kind));
+  const all = (job.items || []).map((item, idx) => ({ item, idx }));
+  const items = all.filter(({ item }) => WEBSITE_KINDS.includes(item.kind));
+  const interactionItems = all.filter(({ item }) => item.kind === 'interaction');
   const screenshots = { desktop: null, mobile: null };
-  const unsureAll = (why) => ({ results: items.map(({ item, idx }) => result(item, idx, 'UNSURE', why, 0)), screenshots });
+  const unsureAll = (why) => ({
+    results: [...items, ...interactionItems].map(({ item, idx }) => result(item, idx, 'UNSURE', why, 0)),
+    screenshots,
+    interactions: [],
+  });
 
   let url;
   try {
@@ -166,7 +174,17 @@ export async function checkWebsiteJob(job) {
         results.push(await checkText(pages, item, idx));
       }
     }
-    return { results, screenshots };
+
+    // Interaction items: same browser (no second Chrome in 512 MB), free the main tabs first.
+    const interactions = [];
+    if (interactionItems.length) {
+      await context.desktop.close().catch(() => {});
+      await context.mobile.close().catch(() => {});
+      for (const { item, idx } of interactionItems) {
+        interactions.push(await checkInteractionItem(browser, url.href, item, idx));
+      }
+    }
+    return { results, screenshots, interactions };
   } catch (err) {
     return unsureAll(`Website check failed: ${err.message.split('\n')[0]}`);
   } finally {

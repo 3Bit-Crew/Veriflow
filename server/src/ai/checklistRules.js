@@ -9,10 +9,28 @@ export const ALLOWED_KINDS = {
     "text_present",
     "visual",
     "speed_score",
+    "interaction",
   ],
 };
 
 export const MAX_ITEMS = 8;
+
+// "interaction" items: the AI clicks and types on the site, then judges the result.
+// Each one costs 2 AI calls and up to a minute of checking, so keep it to a few per job.
+export const MAX_INTERACTION_ITEMS = 2;
+export const MAX_STEPS_TEXT = 300;
+
+// On/off switch for interaction items (INTERACTION_CHECKS=true in .env / Render).
+// Off: the AI never writes them, and they're dropped from AI checklists.
+// Jobs that already have one are still checked either way.
+export const interactionEnabled = () => process.env.INTERACTION_CHECKS === "true";
+
+// The kinds the AI may use right now for a job type.
+export function allowedKinds(type) {
+  const kinds = ALLOWED_KINDS[type];
+  if (!kinds) return undefined;
+  return interactionEnabled() ? kinds : kinds.filter((k) => k !== "interaction");
+}
 
 // Code jobs: the worker must not edit the buyer's tests or CI setup to make them "pass".
 // A rule ending in "/" = whole folder (from the repo root). A rule starting with "*" = file name ending.
@@ -113,6 +131,14 @@ function cleanParams(kind, params = {}) {
         min: Number.isFinite(min) ? Math.min(100, Math.max(1, min)) : 80,
       };
     }
+    case "interaction":
+      // steps = what a user does first, in plain English ("Paste a long link and click Shrink It").
+      return isNonEmptyString(p.steps)
+        ? {
+            steps: p.steps.trim().slice(0, MAX_STEPS_TEXT),
+            viewport: p.viewport === "mobile" ? "mobile" : "desktop",
+          }
+        : null;
     default:
       return null;
   }
@@ -166,7 +192,7 @@ function defaultItems(type) {
  * @returns {Array<{text, kind, params, weight, status}>}
  */
 export function validateAndFixItems(type, items) {
-  const allowed = ALLOWED_KINDS[type];
+  const allowed = allowedKinds(type);
   if (!allowed) throw new Error(`Unknown job type: ${type}`);
 
   let cleaned = (Array.isArray(items) ? items : [])
@@ -183,6 +209,12 @@ export function validateAndFixItems(type, items) {
       };
     })
     .filter(Boolean);
+
+  // At most MAX_INTERACTION_ITEMS interaction items (keep the first ones).
+  let interactions = 0;
+  cleaned = cleaned.filter(
+    (i) => i.kind !== "interaction" || ++interactions <= MAX_INTERACTION_ITEMS,
+  );
 
   // Code jobs: exactly one tests_pass item.
   if (type === "code") {
@@ -241,6 +273,11 @@ export function findChecklistProblems(type, items) {
 
   const sum = items.reduce((a, i) => a + (Number(i?.weight) || 0), 0);
   if (sum !== 100) problems.push(`Weights add up to ${sum}, must be 100`);
+  const interactionCount = items.filter((i) => i?.kind === "interaction").length;
+  if (interactionCount > MAX_INTERACTION_ITEMS)
+    problems.push(
+      `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactionCount})`,
+    );
   if (type === "code") {
     const count = items.filter((i) => i?.kind === "tests_pass").length;
     if (count !== 1)

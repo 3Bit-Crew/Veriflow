@@ -41,9 +41,13 @@ function textProvider(name) {
  * Tries twice with the provider from AI_PROVIDER (gemini | groq).
  * If Gemini is rate-limited and a Groq key exists, switches to Groq.
  * Throws Error('AI failed: ...') if nothing works.
+ * options.preferGroq: try Groq first when a Groq key exists (fast, text-only tasks like planning clicks).
  */
-export async function generateJSON(prompt) {
-  const primary = (process.env.AI_PROVIDER || 'gemini').toLowerCase() === 'groq' ? 'groq' : 'gemini';
+export async function generateJSON(prompt, { preferGroq = false } = {}) {
+  const primary =
+    (preferGroq && process.env.GROQ_API_KEY) || (process.env.AI_PROVIDER || 'gemini').toLowerCase() === 'groq'
+      ? 'groq'
+      : 'gemini';
   let provider = primary;
   let lastError;
 
@@ -56,6 +60,9 @@ export async function generateJSON(prompt) {
       if (provider === 'gemini' && isBusy(err) && process.env.GROQ_API_KEY) {
         console.warn('[ai] Gemini busy or rate-limited, switching to Groq');
         provider = 'groq';
+      } else if (provider === 'groq' && preferGroq && process.env.GEMINI_API_KEY) {
+        console.warn('[ai] Groq failed, switching to Gemini');
+        provider = 'gemini';
       }
     }
   }
