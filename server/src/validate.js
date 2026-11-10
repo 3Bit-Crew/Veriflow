@@ -1,3 +1,4 @@
+import net from 'node:net';
 import mongoose from 'mongoose';
 import Job from './models/Job.js';
 
@@ -50,6 +51,13 @@ export function validateNewJob(body) {
   if (!isNonEmptyString(workerEmail) || !EMAIL.test(workerEmail.trim())) {
     throw httpError(400, 'workerEmail must be a valid email (the worker\'s PayPal sandbox business account)');
   }
+  // PayPal only lets our app VOID holds whose payee is the business account that owns the app.
+  // Any other worker email works until a job fails, then the money can never be released.
+  // So when PAYPAL_WORKER_EMAIL is set, only that account is accepted.
+  const onlyWorker = process.env.PAYPAL_WORKER_EMAIL?.trim();
+  if (onlyWorker && workerEmail.trim().toLowerCase() !== onlyWorker.toLowerCase()) {
+    throw httpError(400, `Worker's PayPal email must be ${onlyWorker} (the sandbox account set up for Veriflow)`);
+  }
 
   const job = {
     title: title.trim(),
@@ -78,7 +86,10 @@ const KIND_RULES = {
                           'needs mustTouch / mustNotTouch as lists of paths'
   },
   website: {
-    page_loads:     (p) => p.path === undefined || isNonEmptyString(p.path) || 'needs params.path like "/"',
+    // A path inside the submitted site only. "/http://other-site" would make the checker leave the site.
+    page_loads:     (p) => p.path === undefined ||
+                          (isNonEmptyString(p.path) && p.path.startsWith('/') && !/^\/*[a-z][\w+.-]*:/i.test(p.path)) ||
+                          'needs params.path like "/" or "/about"',
     element_exists: (p) => isNonEmptyString(p.selector) || 'needs params.selector',
     text_present:   (p) => isNonEmptyString(p.text) || 'needs params.text',
     visual:         (p) => ['desktop', 'mobile'].includes(p.viewport) || 'needs params.viewport "desktop" or "mobile"',
@@ -118,21 +129,43 @@ export function validateChecklist(job, items) {
   return clean;
 }
 
-// Checks POST /api/jobs/:id/submit. Code jobs: a PR in the job's repo. Website jobs: an http(s) URL.
+// True for addresses that point inside our own server or network (localhost, 10.x, 192.168.x,
+// cloud metadata 169.254.x, Render's private service names...). The checker's browser runs on
+// our server and its screenshots are public, so it must never be sent there.
+function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (net.isIPv4(h)) {
+    const [a, b] = h.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (net.isIPv6(h)) {
+    return h === '::' || h === '::1' || /^f[cd]/.test(h) || h.startsWith('fe80') || h.startsWith('::ffff:');
+  }
+  return !h.includes('.'); // one-word names like "veriflow-api" only exist inside a private network
+}
+
+// Checks POST /api/jobs/:id/submit. Code jobs: a PR in the job's repo. Website jobs: a public http(s) URL.
 export function validateSubmissionUrl(job, submissionUrl) {
   if (!isNonEmptyString(submissionUrl)) throw httpError(400, 'submissionUrl is required');
   const url = submissionUrl.trim();
 
   if (job.type === 'code') {
-    const prPattern = new RegExp(`^${job.repoUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pull/\\d+/?$`, 'i');
-    if (!prPattern.test(url)) throw httpError(400, `submissionUrl must be a pull request like ${job.repoUrl}/pull/123`);
-    return url.replace(/\/$/, '');
+    // Also accept what people copy from the PR page: .../pull/12/files, .../pull/12#issuecomment-1, ?w=1
+    const repo = job.repoUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = url.match(new RegExp(`^${repo}/pull/(\\d+)(?:/[\\w-]*)*/?(?:[?#].*)?$`, 'i'));
+    if (!match) throw httpError(400, `submissionUrl must be a pull request like ${job.repoUrl}/pull/123`);
+    return `${job.repoUrl}/pull/${match[1]}`; // one clean form for the GitHub checker
   }
 
   let parsed;
   try { parsed = new URL(url); } catch { parsed = null; }
   if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
     throw httpError(400, 'submissionUrl must be a website address starting with http:// or https://');
+  }
+  if (isPrivateHost(parsed.hostname)) {
+    throw httpError(400, 'submissionUrl must be a public website (not localhost or a private address). Deploy it first, e.g. on Render, Netlify or GitHub Pages');
   }
   return url;
 }

@@ -31,6 +31,8 @@ services:
         value: https://api-m.sandbox.paypal.com
       - key: PAYPAL_MOCK
         value: "false"
+      - key: PAYPAL_WORKER_EMAIL # the sandbox business account that owns the PayPal app
+        sync: false
       - key: AI_PROVIDER
         value: gemini
       - key: GEMINI_API_KEY

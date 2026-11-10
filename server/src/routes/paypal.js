@@ -28,6 +28,12 @@ router.post('/orders/:orderId/authorize', async (req, res) => {
   }
 
   const { authId, authStatus, buyerEmail } = await authorizeOrder(req.params.orderId);
+  // CREATED = money is held. PENDING = PayPal is still reviewing it but will hold it.
+  // Anything else (e.g. DENIED) means no money is held, so the job must not become FUNDED.
+  if (!['CREATED', 'PENDING'].includes(authStatus)) {
+    await logEvent(job._id, 'ERROR', `PayPal did not hold the money (authorization ${authStatus}). Buyer can try paying again.`, { authId, authStatus });
+    throw httpError(402, `PayPal did not approve the payment (status ${authStatus}). Please try again with another payment method.`);
+  }
   job.paypalAuthId = authId;
   if (buyerEmail) job.buyerEmail = buyerEmail;
   job.status = 'FUNDED';
