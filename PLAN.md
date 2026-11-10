@@ -79,6 +79,7 @@ Use Postman **only** on day 1 to try PayPal's API collection.
 
 ### Won't build (say "future work" in the pitch)
 - Design and writing checkers, real money (live mode), user accounts with passwords, mobile app.
+- Instead of accounts, we protect actions with **secret keys per job** (buyer key, worker link, admin key). See **5.10 Authentication**.
 
 ---
 
@@ -309,6 +310,8 @@ A "job object" means the full `Job` document including `items`.
 
 **Submit route checks:** for code jobs, `submissionUrl` must be a PR in the job's `repoUrl` (`https://github.com/owner/repo/pull/123`). For website jobs, it must start with `http`.
 
+**Auth:** every route that changes a job also needs a key. See **5.10** for which key each route needs. A missing key returns **401**, a wrong key returns **403**.
+
 ### 5.9 Payment flow (PayPal Sandbox)
 ```
 1. React PayPal button  createOrder → POST /api/paypal/orders { jobId } → returns { orderId }
@@ -327,6 +330,65 @@ A "job object" means the full `Job` document including `items`.
 ```
 ⚠️ An authorization is safe to capture for **about 3 days** (honor period). Keep demo jobs short.
 🔒 The PayPal **Secret** is used only in Express. React only gets the **Client ID**.
+
+### 5.10 Authentication (owned by A, client side by C)
+
+**Today, anyone who knows a job's id can change it**, including approving its checklist, submitting work, and deciding the payout in review. With sandbox money that's acceptable for a demo, but it's the first question a judge will ask. We fix it **without user accounts**: each person gets a secret key that only they know.
+
+**Who is who**
+| Role | Proves it with | How they get it |
+|---|---|---|
+| **Buyer** | buyer key for that job | Returned **once** by `POST /api/jobs`. The client saves it in the buyer's browser. |
+| **Worker** | worker key for that job | Also returned by `POST /api/jobs`. The buyer sends the worker a link: `/jobs/:id/submit?key=<workerKey>` |
+| **Reviewer** (decides payouts in `NEEDS_REVIEW`) | admin key | `ADMIN_KEY` in the server `.env`. Shared privately with the team. |
+| **AI agent** (Agent API, stretch) | agent key | `AGENT_API_KEY` in the server `.env` |
+| **Anyone** | nothing | Can **read** jobs, events and screenshots (the public dashboard is part of the demo) |
+
+**Rules**
+- Keys are long random strings: `crypto.randomBytes(24).toString('base64url')`.
+- The database stores only a **SHA-256 hash** of each key (`buyerKeyHash`, `workerKeyHash` on `Job`, with `select: false`), never the key itself. A leaked database doesn't leak keys.
+- Keys are compared with `crypto.timingSafeEqual` (on the hashes).
+- Keys travel in a **header**: `x-job-key` for buyer and worker, `x-admin-key` for the reviewer, `x-api-key` for agents. Never in a request body.
+- The worker link puts the key in the URL **only once**. The client saves it and removes it from the address bar (`history.replaceState`). The client sets `<meta name="referrer" content="no-referrer">` so the key never leaks to other sites.
+- Job responses (`GET` and others) **never** include key hashes.
+- The **admin key also works as buyer or worker** for any job (for fixing demo mistakes).
+- Errors: missing key → `401 { "error": "This action needs a key" }`, wrong key → `403 { "error": "Wrong key for this job" }`.
+
+**Which key each route needs (5.8)**
+| Route | Needs |
+|---|---|
+| `POST /api/jobs` | nothing (or `x-api-key` for agents). Response adds `{ buyerKey, workerKey }` **this one time only** |
+| `POST /api/jobs/:id/checklist`, `PUT /api/jobs/:id/checklist` | buyer key |
+| `POST /api/paypal/orders`, `POST /api/paypal/orders/:orderId/authorize` | buyer key |
+| `POST /api/jobs/:id/submit` | worker key |
+| `POST /api/jobs/:id/review` | admin key |
+| All `GET` routes | nothing |
+
+The checker loop (B) runs inside the server and calls `settleJob()` directly, so it needs no key. **B's code doesn't change.**
+
+**Code changes**
+| Who | File | Change |
+|---|---|---|
+| A | `server/src/auth.js` (new) | `makeKey()`, `hashKey()`, and middleware `requireJobKey('buyer' \| 'worker')`, `requireAdminKey`, `requireAgentKey` |
+| A | `server/src/models/Job.js` | add `buyerKeyHash`, `workerKeyHash` (`select: false`) |
+| A | `server/src/routes/*.js` | put the middleware on the routes above. `POST /api/jobs` returns the 2 keys once |
+| A | `server/.env.example`, `render.yaml` | `ADMIN_KEY`, `AGENT_API_KEY` |
+| C | `client/src/api.js` | save keys in `localStorage` (`veriflow:key:<jobId>`) and send `x-job-key` / `x-admin-key` |
+| C | New job page | after creating, show the **worker link** with a "Copy" button |
+| C | Submit page | read `?key=` from the link, save it, remove it from the URL |
+| C | Review box | ask for the admin key once and keep it in `sessionStorage` |
+
+**Tests (A)**
+- No key → 401. Buyer key on submit → 403. Worker key on the checklist → 403. The right key → works.
+- The admin key works everywhere. `GET /api/jobs` has no key hashes.
+- Full flow on Render with keys: create → pay → open the worker link → submit → paid.
+
+**Timing:** today is feature-freeze day (noon, Nov 11). Build this **only if** it's done and passes the full live flow **before the freeze**. Otherwise, keep it as the first item under "future work" and mention it in the pitch.
+
+**Future work (after the hackathon)**
+- Real accounts: sign in with email or Google/GitHub (OAuth), JWT in an `httpOnly` cookie, and buyer, worker and reviewer roles on the user.
+- Workers connect their **own** PayPal account (PayPal partner onboarding) instead of one shared sandbox account.
+- Rate limits on login and job creation, and audit events for who did each action.
 
 ---
 
@@ -432,6 +494,8 @@ GEMINI_API_KEY=...
 GROQ_API_KEY=...
 GITHUB_TOKEN=...
 PAGESPEED_API_KEY=...                   # optional
+ADMIN_KEY=...                           # reviewer key for payouts (5.10), long random string
+AGENT_API_KEY=...                       # Agent API key (5.10, stretch)
 ```
 `client/.env`
 ```
@@ -453,6 +517,7 @@ veriflow/
 │  ├─ src/
 │  │  ├─ index.js                  # app setup, routes, startCheckerLoop()  (A)
 │  │  ├─ events.js                 # logEvent()                             (A)
+│  │  ├─ auth.js                   # keys + auth middleware (5.10)          (A)
 │  │  ├─ models/                   # Job.js, Event.js, Screenshot.js        (A)
 │  │  ├─ routes/                   # jobs.js, paypal.js, screenshots.js     (A)
 │  │  ├─ paypal/                   # client.js (token), orders.js, settle.js (A)
