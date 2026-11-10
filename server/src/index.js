@@ -7,6 +7,7 @@ import paypalRoutes from './routes/paypal.js';
 import eventRoutes from './routes/events.js';
 import screenshotRoutes from './routes/screenshots.js';
 import { startCheckerLoop } from './checkers/loop.js';
+import Job from './models/Job.js';
 
 import dns from 'node:dns';
 dotenv.config({ quiet: true });
@@ -68,13 +69,22 @@ async function start() {
 
   const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 
-  // Render sends SIGTERM before replacing the server on each deploy: stop cleanly.
-  // (A job cut off mid-check is re-queued by the loop when the new server starts.)
-  process.once('SIGTERM', () => {
+  // Render sends SIGTERM before replacing the server on each deploy, and kills it 30s later.
+  // Stop taking new jobs, let a check that is already running finish (so its results and
+  // payment are saved), then disconnect.
+  process.once('SIGTERM', async () => {
     console.log('SIGTERM received, shutting down');
     stopLoop?.();
-    server.close(() => mongoose.disconnect().finally(() => process.exit(0)));
-    setTimeout(() => process.exit(0), 10_000).unref(); // don't hang forever
+    server.close();
+    const giveUpAt = Date.now() + 25_000;
+    try {
+      while (Date.now() < giveUpAt && await Job.exists({ status: 'CHECKING' })) {
+        console.log('[shutdown] waiting for the running check to finish...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    } catch { /* database already gone: nothing to wait for */ }
+    await mongoose.disconnect().catch(() => {});
+    process.exit(0);
   });
 }
 

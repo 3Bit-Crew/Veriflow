@@ -38,8 +38,11 @@ export async function settleJob(job, amount) {
   let paypalResult = null;
   if (!mock) {
     try {
-      // Same request id on a retry -> PayPal won't capture/void twice
-      const requestId = `settle-${job._id}-${job.paypalAuthId}`;
+      // Same request id on an identical retry -> PayPal won't capture/void twice.
+      // The action + amount are part of it, so a reviewer who picks a different payout after a
+      // failed attempt gets a fresh request instead of PayPal replaying the old (failed) answer.
+      // Paying twice is still impossible: final_capture closes the authorization after one capture.
+      const requestId = `settle-${job._id}-${settlement}-${money(payout)}`;
       paypalResult = settlement === 'VOID'
         ? await voidAuthorization(job.paypalAuthId, requestId)
         : await captureAuthorization(job.paypalAuthId, payout, job.currency, requestId);
