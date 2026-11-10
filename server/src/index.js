@@ -6,6 +6,7 @@ import jobRoutes from './routes/jobs.js';
 import paypalRoutes from './routes/paypal.js';
 import eventRoutes from './routes/events.js';
 import screenshotRoutes from './routes/screenshots.js';
+import { startCheckerLoop } from './checkers/loop.js';
 
 import dns from 'node:dns';
 dotenv.config({ quiet: true });
@@ -55,11 +56,26 @@ async function start() {
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('MongoDB connected');
 
-  // Day 4: start B's checker loop here
-  // import { startCheckerLoop } from './checkers/loop.js'; (at the top of the file)
-  // startCheckerLoop();
+  // B's checker loop: checks submitted work every 5 seconds.
+  // Only ONE server should run it per database. When the Render server is live, set
+  // CHECKER_LOOP=false in your laptop's .env (a restarting laptop would re-queue jobs Render is checking).
+  let stopLoop = null;
+  if (process.env.CHECKER_LOOP === 'false') {
+    console.log('[checker] loop is OFF (CHECKER_LOOP=false)');
+  } else {
+    stopLoop = startCheckerLoop();
+  }
 
-  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+  const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+  // Render sends SIGTERM before replacing the server on each deploy: stop cleanly.
+  // (A job cut off mid-check is re-queued by the loop when the new server starts.)
+  process.once('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down');
+    stopLoop?.();
+    server.close(() => mongoose.disconnect().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 10_000).unref(); // don't hang forever
+  });
 }
 
 start().catch((err) => {
