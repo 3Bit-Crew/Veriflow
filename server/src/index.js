@@ -16,7 +16,13 @@ if (process.env.DNS_SERVERS) dns.setServers(process.env.DNS_SERVERS.split(',').m
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
+// CORS: which websites may call this API. CLIENT_URL can list several, separated by commas,
+// e.g. "https://veriflow-web.onrender.com,http://localhost:5173"
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((url) => url.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
