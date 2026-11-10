@@ -2,56 +2,116 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getJob } from '../api.js';
 import ChecklistView from '../components/ChecklistView.jsx';
+import ReviewBox from '../components/ReviewBox.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { formatMoney, formatTime } from '../format.js';
 
 const POLL_MS = 2000;
+const REVEAL_MS = 150;
 const MAX_TRIES = 2; // first try plus one resubmit (PLAN.md 5.5)
 const MONEY_EVENTS = ['PAYPAL_AUTHORIZED', 'PAYPAL_CAPTURED', 'PAYPAL_VOIDED'];
 
 // Polls GET /api/jobs/:id every 2s until the job is SETTLED. Skips polls while the tab
 // is hidden, keeps the last good data if a poll fails, and backs off while failing.
+// refresh() fetches straight away, for right after an action like a review.
 function useLiveJob(id) {
   const [state, setState] = useState({ data: null, error: null });
+  const refreshRef = useRef(() => {});
 
   useEffect(() => {
     let active = true;
     let timer;
+    let generation = 0; // a refresh starts a new chain; older in-flight polls then stop
     setState({ data: null, error: null });
 
-    async function tick() {
+    async function tick(mine) {
       if (document.hidden) {
-        timer = setTimeout(tick, POLL_MS);
+        timer = setTimeout(() => tick(mine), POLL_MS);
         return;
       }
       let wait = POLL_MS;
       try {
         const data = await getJob(id);
-        if (!active) return;
+        if (!active || mine !== generation) return;
         setState({ data, error: null });
         if (data.job.status === 'SETTLED') return;
       } catch (error) {
-        if (!active) return;
+        if (!active || mine !== generation) return;
         setState((current) => ({ data: current.data, error }));
         if (error.status === 404) return;
         wait = POLL_MS * 2;
       }
-      timer = setTimeout(tick, wait);
+      timer = setTimeout(() => tick(mine), wait);
     }
 
-    tick();
+    refreshRef.current = () => {
+      generation += 1;
+      clearTimeout(timer);
+      tick(generation);
+    };
+    tick(generation);
     return () => {
       active = false;
       clearTimeout(timer);
     };
   }, [id]);
 
-  return state;
+  return { ...state, refresh: () => refreshRef.current() };
+}
+
+const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
+
+// When several results land in one poll (GitHub reports all of a code job's checks at
+// once), shows them one at a time, 150ms apart, still as "Checking". The job's real
+// status (and the payout panel) only appears after the last result. Presentation only:
+// the data is untouched.
+function useStaggeredReveal(latest) {
+  const [shown, setShown] = useState(latest);
+  const shownRef = useRef(latest);
+
+  useEffect(() => {
+    if (!latest) return;
+    const show = (job) => {
+      shownRef.current = job;
+      setShown(job);
+    };
+    const prev = shownRef.current;
+    const comparable = prev && prev._id === latest._id && prev.items.length === latest.items.length;
+    const landed = comparable
+      ? latest.items.map((_, i) => i).filter((i) => !isResult(prev.items[i].status) && isResult(latest.items[i].status))
+      : [];
+    if (landed.length < 2) {
+      show(latest);
+      return;
+    }
+
+    let count = 0;
+    let timer;
+    const step = () => {
+      count += 1;
+      if (count > landed.length) {
+        show(latest);
+        return;
+      }
+      const hidden = new Set(landed.slice(count));
+      show({
+        ...latest,
+        status: 'CHECKING',
+        items: latest.items.map((item, i) => (hidden.has(i) ? prev.items[i] : item)),
+      });
+      timer = setTimeout(step, REVEAL_MS);
+    };
+    step();
+    return () => clearTimeout(timer);
+  }, [latest]);
+
+  return shown && latest && shown._id === latest._id ? shown : latest;
 }
 
 export default function JobStatus() {
   const { id } = useParams();
-  const { data, error } = useLiveJob(id);
+  const { data, error, refresh } = useLiveJob(id);
+  const revealed = useStaggeredReveal(data?.job);
 
   // The status when this page first loaded, so the payout only counts up when the
   // job settles while someone is watching, not every time a settled job is opened.
@@ -71,7 +131,8 @@ export default function JobStatus() {
     return <section className="page"><p className="muted">Loading…</p></section>;
   }
 
-  const { job, events } = data;
+  const { events } = data;
+  const job = revealed;
   const watchedSettle = job.status === 'SETTLED' && firstSeen.current.status !== 'SETTLED';
 
   return (
@@ -92,7 +153,7 @@ export default function JobStatus() {
       )}
 
       {/* Keyed by status so each new state eases in. */}
-      <StatusPanel key={job.status} job={job} countUp={watchedSettle} />
+      <StatusPanel key={job.status} job={job} countUp={watchedSettle} onReviewed={refresh} />
 
       <div className="job-layout">
         <div className="stack">
@@ -113,7 +174,7 @@ export default function JobStatus() {
   );
 }
 
-function StatusPanel({ job, countUp }) {
+function StatusPanel({ job, countUp, onReviewed }) {
   const amount = formatMoney(job.amount, job.currency);
   const submitLink = `/jobs/${job._id}/submit`;
 
@@ -194,8 +255,9 @@ function StatusPanel({ job, countUp }) {
         <div className="card card--warn stack">
           <div>
             <h2>A person needs to decide the payout</h2>
-            <p>The AI wasn't confident about at least one item. {amount} stays held until someone reviews the evidence below.</p>
+            <p>The AI wasn't confident about at least one item. {amount} stays held until someone reviews the evidence below and settles it.</p>
           </div>
+          <ReviewBox job={job} onSettled={onReviewed} />
         </div>
       );
 

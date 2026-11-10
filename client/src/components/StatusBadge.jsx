@@ -21,6 +21,8 @@ const TONES = {
   SETTLED: 'good',
 };
 
+export const statusLabel = (status) => LABELS[status] || status;
+
 export default function StatusBadge({ status }) {
   return <span className={`badge badge--${TONES[status] || 'neutral'}`}>{LABELS[status] || status}</span>;
 }
