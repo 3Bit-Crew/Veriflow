@@ -93,9 +93,15 @@ const KIND_RULES = {
     element_exists: (p) => isNonEmptyString(p.selector) || 'needs params.selector',
     text_present:   (p) => isNonEmptyString(p.text) || 'needs params.text',
     visual:         (p) => ['desktop', 'mobile'].includes(p.viewport) || 'needs params.viewport "desktop" or "mobile"',
-    speed_score:    (p) => (Number.isFinite(p.min) && p.min >= 0 && p.min <= 100) || 'needs params.min between 0 and 100'
+    speed_score:    (p) => (Number.isFinite(p.min) && p.min >= 0 && p.min <= 100) || 'needs params.min between 0 and 100',
+    // Plain-English steps the checker performs on the page, e.g. "Click Sign up, type an email, press Submit"
+    interaction:    (p) => (isNonEmptyString(p.steps) && p.steps.length <= MAX_INTERACTION_STEPS_CHARS &&
+                            ['desktop', 'mobile'].includes(p.viewport)) ||
+                          `needs params.steps (up to ${MAX_INTERACTION_STEPS_CHARS} characters) and params.viewport "desktop" or "mobile"`
   }
 };
+const MAX_INTERACTION_STEPS_CHARS = 300;
+const MAX_INTERACTION_ITEMS = 2; // each one drives a browser session, so keep checks fast and cheap
 
 // Checks the items of PUT /api/jobs/:id/checklist. Returns clean items or throws 400.
 export function validateChecklist(job, items) {
@@ -126,13 +132,19 @@ export function validateChecklist(job, items) {
     const tests = clean.filter((it) => it.kind === 'tests_pass').length;
     if (tests !== 1) throw httpError(400, `Code jobs need exactly one tests_pass item (found ${tests})`);
   }
+
+  const interactions = clean.filter((it) => it.kind === 'interaction').length;
+  if (interactions > MAX_INTERACTION_ITEMS) {
+    throw httpError(400, `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactions})`);
+  }
   return clean;
 }
 
 // True for addresses that point inside our own server or network (localhost, 10.x, 192.168.x,
 // cloud metadata 169.254.x, Render's private service names...). The checker's browser runs on
 // our server and its screenshots are public, so it must never be sent there.
-function isPrivateHost(hostname) {
+// Exported so the checkers can reuse it, e.g. to block a navigation during an interaction check.
+export function isPrivateHost(hostname) {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
   if (net.isIPv4(h)) {
