@@ -2,26 +2,23 @@
 # Render dashboard -> New -> Blueprint -> pick this repo. Render reads this file and
 # asks for every value marked "sync: false" (secrets are typed in Render, never committed).
 #
-# Day 3: server runs as a plain Node service (no Playwright, the checker loop is not started yet).
-# Day 4: the server switches to a Dockerfile with Playwright (runtime: docker).
+# Server: Docker image with Playwright + Chromium (server/Dockerfile), runs the API and the checker loop.
+# Client: static site built by Vite.
 
 services:
-  # ---------- Backend: Express API ----------
+  # ---------- Backend: Express API + checker loop ----------
   - type: web
     name: veriflow-api
-    runtime: node
-    plan: free
+    runtime: docker
+    plan: free # 512 MB RAM. If Render logs say "out of memory" during checks, switch to starter
     branch: main
-    rootDir: server
-    buildCommand: npm ci
-    startCommand: npm start
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD # browsers come with the Docker image on day 4
-        value: "1"
+      - key: CHECKER_LOOP # this server is the one that runs the checker loop
+        value: "true"
       - key: MONGODB_URI
         sync: false
       - key: CLIENT_URL # the client's Render URL, e.g. https://veriflow-web.onrender.com
