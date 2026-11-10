@@ -71,6 +71,17 @@ const result = (item, idx, status, reasoning, logUrl = null, confidence = 1.0) =
   evidence: { screenshots: [], logUrl },
 });
 
+// Does the repo have at least one active GitHub Actions workflow?
+// If we can't tell (API error), say yes, so the loop keeps waiting as before.
+async function hasActiveWorkflows(base) {
+  try {
+    const data = await gh(`${base}/actions/workflows?per_page=100`);
+    return (data.workflows || []).some((w) => w.state === 'active');
+  } catch {
+    return true;
+  }
+}
+
 // ---------- the two checks ----------
 
 // tests_pass: look at every GitHub Actions check run on the PR's latest commit.
@@ -124,9 +135,11 @@ function judgeFiles(changedFiles, params) {
 
 /**
  * @param {object} job  needs: submissionUrl (PR URL), repoUrl, items[]
- * @param {{ timedOut?: boolean }} options  timedOut=true → still-running tests become UNSURE instead of null
+ * @param {{ timedOut?: boolean, onPending?: (why: string) => void }} options
+ *   timedOut=true → still-running tests become UNSURE instead of null
+ *   onPending     → called with the reason whenever we return null (so the loop can tell the user)
  */
-export async function checkCodeJob(job, { timedOut = false } = {}) {
+export async function checkCodeJob(job, { timedOut = false, onPending } = {}) {
   const items = job.items || [];
   const unsureAll = (why) => items.map((item, i) => result(item, i, 'UNSURE', why, null, 0));
 
@@ -151,11 +164,25 @@ export async function checkCodeJob(job, { timedOut = false } = {}) {
       needsFiles ? ghAll(`${base}/pulls/${pr.number}/files`).then((fs) => fs.map((f) => f.filename)) : [],
     ]);
 
-    const tests = needsTests ? judgeTests(checkRuns) : null;
-    if (tests?.pending && !timedOut) return null; // loop.js will try again
+    let tests = needsTests ? judgeTests(checkRuns) : null;
+
+    // No check runs at all: if the repo has no GitHub Actions, no tests will ever start,
+    // so don't make everyone wait 5 minutes. A person decides instead.
+    if (tests?.pending && checkRuns.length === 0 && !(await hasActiveWorkflows(base))) {
+      tests = {
+        noCi: true,
+        reasoning: 'This repository has no GitHub Actions workflows, so there are no tests to run. A person needs to check the work.',
+      };
+    }
+
+    if (tests?.pending && !timedOut) {
+      onPending?.(tests.why);
+      return null; // loop.js will try again
+    }
 
     return items.map((item, i) => {
       if (item.kind === 'tests_pass') {
+        if (tests.noCi) return result(item, i, 'UNSURE', tests.reasoning, prLink, 0);
         if (tests.pending) return result(item, i, 'UNSURE', `${tests.why} (gave up waiting)`, prLink, 0);
         return result(item, i, tests.status, tests.reasoning, tests.logUrl);
       }

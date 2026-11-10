@@ -29,12 +29,12 @@ const waiting = new Map();
 // ---------- running the checkers ----------
 
 // Returns results for every item, or null if GitHub tests are still running.
-async function runCheckers(job) {
+async function runCheckers(job, { onPending } = {}) {
   if (job.type === 'code') {
     const id = String(job._id);
     const since = waiting.get(id)?.since ?? Date.now();
     const timedOut = Date.now() - since > WAIT_FOR_TESTS_MS;
-    return checkCodeJob(job, { timedOut });
+    return checkCodeJob(job, { timedOut, onPending });
   }
 
   // Website job: Playwright first (screenshots), then AI on the screenshots, then speed.
@@ -120,14 +120,23 @@ export async function processNextJob() {
       });
     }
 
-    const results = await runCheckers(job);
+    let pendingWhy = null;
+    const results = await runCheckers(job, { onPending: (why) => { pendingWhy = why; } });
 
     if (results === null) {
       // GitHub tests still running → back in the queue, try again later.
       const w = waiting.get(id);
-      waiting.set(id, { since: w?.since ?? Date.now(), lastTry: Date.now() });
+      waiting.set(id, { since: w?.since ?? Date.now(), lastTry: Date.now(), lastWhy: pendingWhy });
       job.status = 'SUBMITTED';
       await job.save();
+      // Tell the user why we're waiting, but only when the reason changes (not every 15s).
+      if (pendingWhy && pendingWhy !== w?.lastWhy) {
+        const mins = Math.round(WAIT_FOR_TESTS_MS / 60000);
+        await logEvent(job._id, 'CHECK_STARTED', `Waiting for GitHub: ${pendingWhy}. Gives up after ${mins} minutes.`, {
+          waiting: true,
+          reason: pendingWhy,
+        });
+      }
       return job;
     }
     waiting.delete(id);
