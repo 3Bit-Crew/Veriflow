@@ -23,7 +23,9 @@ const WAIT_FOR_TESTS_MS = 5 * 60 * 1000; // give GitHub Actions up to 5 minutes
 const RETRY_PENDING_MS = 15000; // while tests run, look again every 15s (saves GitHub API calls)
 // A job left in CHECKING longer than this is treated as abandoned (its server crashed or was replaced)
 // and goes back to the queue. Must be longer than the slowest real check, or a job could be checked twice.
-const STALE_CHECKING_MS = 5 * 60 * 1000;
+// A website job can take several minutes: 2 page loads, AI screenshot checks, PageSpeed (up to 60s)
+// and up to 2 interaction items (up to 2 minutes each).
+const STALE_CHECKING_MS = 10 * 60 * 1000;
 const SWEEP_EVERY_MS = 60 * 1000; // how often to look for abandoned jobs
 
 // Jobs whose GitHub tests are still running: jobId → { since, lastTry }.
@@ -41,8 +43,8 @@ async function runCheckers(job, { onPending } = {}) {
     return checkCodeJob(job, { timedOut, onPending });
   }
 
-  // Website job: Playwright first (screenshots), then AI on the screenshots, then speed.
-  const { results, screenshots } = await checkWebsiteJob(job);
+  // Website job: Playwright first (screenshots + interaction items), then AI on the screenshots, then speed.
+  const { results, screenshots, interactions = [] } = await checkWebsiteJob(job);
 
   const ids = {};
   for (const viewport of ['desktop', 'mobile']) {
@@ -62,7 +64,16 @@ async function runCheckers(job, { onPending } = {}) {
     const own = item?.kind === 'visual' ? ids[item.params?.viewport === 'desktop' ? 'desktop' : 'mobile'] : null;
     r.evidence.screenshots = own ? [own] : allIds;
   }
-  return [...results, ...visual, ...speed];
+
+  // Interaction items: their evidence is the page AFTER the AI did the steps.
+  const byItemId = new Map(job.items.map((item) => [String(item._id), item]));
+  for (const { result, shot } of interactions) {
+    if (!shot) continue;
+    const viewport = byItemId.get(result.itemId)?.params?.viewport === 'mobile' ? 'mobile' : 'desktop';
+    const doc = await Screenshot.create({ jobId: job._id, viewport, data: shot });
+    result.evidence.screenshots = [String(doc._id)];
+  }
+  return [...results, ...visual, ...speed, ...interactions.map((i) => i.result)];
 }
 
 // Copy results onto the job's items and log one CHECK_RESULT per item.
