@@ -89,7 +89,7 @@ const KIND_RULES = {
 // Checks the items of PUT /api/jobs/:id/checklist. Returns clean items or throws 400.
 export function validateChecklist(job, items) {
   if (!Array.isArray(items) || items.length === 0) throw httpError(400, 'items must be a non-empty list');
-  if (items.length > 20) throw httpError(400, 'At most 20 checklist items');
+  if (items.length >8) throw httpError(400, 'At most 8 checklist items');
 
   const rules = KIND_RULES[job.type];
   const clean = items.map((item, i) => {
