@@ -21,6 +21,10 @@ import { checkSpeedItems } from './speed.js';
 const INTERVAL_MS = 5000;
 const WAIT_FOR_TESTS_MS = 5 * 60 * 1000; // give GitHub Actions up to 5 minutes
 const RETRY_PENDING_MS = 15000; // while tests run, look again every 15s (saves GitHub API calls)
+// A job left in CHECKING longer than this is treated as abandoned (its server crashed or was replaced)
+// and goes back to the queue. Must be longer than the slowest real check, or a job could be checked twice.
+const STALE_CHECKING_MS = 5 * 60 * 1000;
+const SWEEP_EVERY_MS = 60 * 1000; // how often to look for abandoned jobs
 
 // Jobs whose GitHub tests are still running: jobId → { since, lastTry }.
 // In memory only: after a restart the 5-minute wait simply starts again.
@@ -179,19 +183,40 @@ export async function processNextJob() {
 
 // ---------- the loop ----------
 
+// Put abandoned jobs back in the queue: CHECKING, but untouched for STALE_CHECKING_MS.
+// Only old ones: during a Render deploy the old server is still checking its job while the
+// new one starts, and re-queuing that job would check it twice (attempts +2, so a first try
+// would be judged as the second try and paid out instead of getting "changes requested").
+export async function requeueStaleJobs() {
+  const cutoff = new Date(Date.now() - STALE_CHECKING_MS);
+  const stale = await Job.find({ status: 'CHECKING', updatedAt: { $lt: cutoff } }).select('_id');
+  for (const { _id } of stale) {
+    // Same condition again, so a job that just moved on is left alone.
+    const r = await Job.updateOne({ _id, status: 'CHECKING', updatedAt: { $lt: cutoff } }, { $set: { status: 'SUBMITTED' } });
+    if (r.modifiedCount) {
+      waiting.delete(String(_id));
+      console.log(`[checker] re-queued job ${_id}: it was stuck in CHECKING`);
+      await logEvent(_id, 'CHECK_STARTED', 'The check was interrupted (server restart), so it will run again.', { requeued: true });
+    }
+  }
+  return stale.length;
+}
+
 /** Starts checking jobs every 5 seconds. Call once, after MongoDB is connected. Returns stop(). */
 export function startCheckerLoop({ intervalMs = INTERVAL_MS } = {}) {
   let busy = false; // a website check can take longer than 5s; never run two at once
-
-  // A crash or restart may leave jobs half-checked: put them back in the queue.
-  Job.updateMany({ status: 'CHECKING' }, { $set: { status: 'SUBMITTED' } })
-    .then((r) => r.modifiedCount && console.log(`[checker] re-queued ${r.modifiedCount} job(s) stuck in CHECKING`))
-    .catch((err) => console.error('[checker] could not re-queue jobs:', err.message));
+  let lastSweep = 0; // 0 = sweep on the first tick, right after startup
 
   const timer = setInterval(async () => {
     if (busy || mongoose.connection.readyState !== 1) return;
     busy = true;
     try {
+      // Runs every minute, not only at startup, so a job abandoned by a server that
+      // stopped after this one started is still picked up.
+      if (Date.now() - lastSweep >= SWEEP_EVERY_MS) {
+        lastSweep = Date.now();
+        await requeueStaleJobs().catch((err) => console.error('[checker] could not re-queue jobs:', err.message));
+      }
       await processNextJob();
     } catch (err) {
       console.error('[checker] loop error:', err.message);
