@@ -11,6 +11,7 @@ export const KIND_LABELS = {
   text_present: 'Text present',
   visual: 'Visual check (AI)',
   speed_score: 'Speed score',
+  interaction: 'Interaction (AI)',
 };
 
 // One plain sentence saying what the checker will actually test.
@@ -34,6 +35,9 @@ export function describeParams({ kind, params = {} }) {
       return `AI judges a ${params.viewport || 'mobile'} screenshot`;
     case 'speed_score':
       return `PageSpeed score of at least ${params.min}`;
+    case 'interaction':
+      // The AI uses the site (types, clicks) on this screen size, then judges what happened.
+      return `AI will, on ${params.viewport === 'mobile' ? 'mobile' : 'desktop'}: ${params.steps}`;
     default:
       return '';
   }
