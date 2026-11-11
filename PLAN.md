@@ -693,7 +693,7 @@ The buyer's 6 tests:
 - [ ] Tell the team you're recording. **Nobody pushes to `main`** until you say you're done (8.5).
 - [ ] All 3 PRs are open and their GitHub Actions runs have finished.
 - [ ] **Pre-run two jobs**, so nobody waits on screen:
-  - the **website job** on the broken site URL (ends in human review or a partial payout)
+  - the **website job**, in two tries: submit the broken site URL. The visual check fails, so the first try ends in "Changes requested" (5.5: a confident failure on a first try always does). Then submit the **same broken URL again**: the second try ends in a **partial payout**, with the visual item's share returned to the buyer. (If the AI is unsure instead, it ends in human review. That works for the script too.)
   - the **cheat job** on the `cheat` PR (ends in "Changes requested" with the test-protection item red)
 - [ ] Wake up Render: open the live site and `<server>/api/health` a few minutes before (the free plan sleeps after ~15 minutes).
 - [ ] Have ready: the sandbox **buyer** login for the PayPal popup (8.1). The worker email `sb-m8uku53787938@business.example.com` (5.8) is already filled in on the New job form.
@@ -705,7 +705,7 @@ The buyer's 6 tests:
 | 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200** (the worker email is already filled in), and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
 | 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Rounds to cents, Shipping not discounted"** → **"Changes requested. $200.00 is still held."** |
 | 4 | **Second try** | 35s | The worker submits the `fix` PR. Items turn green one by one → **"$200.00 released to the worker via PayPal."** |
-| 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot, so it went to human review or a partial payout. |
+| 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot. The worker resubmitted without fixing it, so PayPal paid only for the items that passed and returned the rest to the buyer. |
 | 6 | **Dashboard** | 20s | AG Grid: every job, every check result and every PayPal action, all auditable. |
 | 7 | **Close** | 10s | "Veriflow: money moves only when the work is proven." |
 
