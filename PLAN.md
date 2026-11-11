@@ -684,10 +684,12 @@ The buyer's 6 tests:
 - `attempt-1` and `fix` change **only `src/checkout.js`**. They never touch `tests/`, `.github/` or `src/payment/`, so only the tests decide the result.
 - `cheat` needs **its own job**, because a job allows only two tries (first try plus one resubmit) and the main job uses both. Run it before recording. Note that the test-protection item is worth only about 10%: on a *second* try, a cheat would still get a partial payout of about 90%. So say "caught" on screen, not "blocked".
 
-**Demo website** (two public URLs, on Render Static Site or GitHub Pages)
-- A bakery landing page: headline "Fresh every morning", an email field and a "Sign up" button.
-- **Good version:** everything fits on a phone.
-- **Broken version:** the "Sign up" button is cut off at the right edge on a 390px phone screen, so the AI vision check flags it.
+**Demo website: `3Bit-Crew/veriflow-demo-site`** (public, on GitHub Pages, live since Nov 11)
+- A bakery landing page: headline "Fresh every morning", an email field and a "Sign up" button. Signing up shows "Thank you, you're on the list!" in place of the form (for the interaction check).
+- **Good version:** `https://3bit-crew.github.io/veriflow-demo-site/good/`. Everything fits on a phone.
+- **Broken version:** `https://3bit-crew.github.io/veriflow-demo-site/broken/`. The "Sign up" button is cut off at the right edge on a 390px phone screen, so the AI vision check flags it. On desktop it looks the same as the good one.
+- Job description to type (type Website): *Landing page for my bakery with the headline "Fresh every morning", a signup form with an email field and a "Sign up" button. Signing up shows a thank-you message. Must look good on mobile.*
+- Details and what each check should find: `demo/README.md`.
 
 ### 10.2 Before recording
 - [ ] Tell the team you're recording. **Nobody pushes to `main`** until you say you're done (8.5).
