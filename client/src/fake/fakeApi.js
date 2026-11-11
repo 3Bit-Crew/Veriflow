@@ -17,7 +17,7 @@ const LATENCY_MS = 150;
 
 const ALLOWED_KINDS = {
   code: ['tests_pass', 'files_changed'],
-  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score', 'interaction'],
+  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score', 'interaction', 'lighthouse_score'],
 };
 const MAX_ITEMS = 8;
 const MAX_INTERACTION_ITEMS = 2; // same limit as the server: each one drives a real browser
@@ -225,6 +225,7 @@ function resultFor(job, index) {
       text_present: `Found the text "${item.params.text}".`,
       visual: 'The layout fits the screen and every control is visible.',
       speed_score: 'The speed score is above the minimum.',
+      lighthouse_score: `The Lighthouse ${item.params.category} score is above ${item.params.min}.`,
       interaction: 'Typed an email and clicked Sign up. A thank-you message appeared.',
     }[item.kind] || 'The check passed.',
     evidence,
@@ -570,6 +571,10 @@ function checklistProblem(type, items) {
   if (interactions > MAX_INTERACTION_ITEMS) {
     return `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactions})`;
   }
+  // Same as the server: one Lighthouse item per category, or one score would count twice.
+  const categories = items.filter((i) => i.kind === 'lighthouse_score').map((i) => i.params?.category);
+  const repeated = categories.find((c, n) => categories.indexOf(c) !== n);
+  if (repeated) return `Only one lighthouse_score item per category (${repeated} appears twice)`;
   return null;
 }
 

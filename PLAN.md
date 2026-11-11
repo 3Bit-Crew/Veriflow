@@ -696,13 +696,13 @@ The buyer's 6 tests:
   - the **website job** on the broken site URL (ends in human review or a partial payout)
   - the **cheat job** on the `cheat` PR (ends in "Changes requested" with the test-protection item red)
 - [ ] Wake up Render: open the live site and `<server>/api/health` a few minutes before (the free plan sleeps after ~15 minutes).
-- [ ] Have ready: the sandbox **buyer** login for the PayPal popup (8.1), and the worker email `sb-m8uku53787938@business.example.com` (5.8).
+- [ ] Have ready: the sandbox **buyer** login for the PayPal popup (8.1). The worker email `sb-m8uku53787938@business.example.com` (5.8) is already filled in on the New job form.
 
 ### 10.3 Script
 | # | Part | Time | What happens on screen |
 |---|---|---|---|
 | 1 | **Problem** | 20s | "Online work has a trust problem. And soon AI agents will be hiring other AI agents with no human watching." |
-| 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200**, the worker email above, and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
+| 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200** (the worker email is already filled in), and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
 | 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Rounds to cents, Shipping not discounted"** → **"Changes requested. $200.00 is still held."** |
 | 4 | **Second try** | 35s | The worker submits the `fix` PR. Items turn green one by one → **"$200.00 released to the worker via PayPal."** |
 | 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot, so it went to human review or a partial payout. |
@@ -754,7 +754,7 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 |---|---|---|---|
 | 13.1 | Interaction checks (AI clicks and types on the site) | M, K, H | K done; M on branch `b/interaction-check`; H done (PR #16) |
 | 13.3 | PageSpeed API key | K | To do (blocks 13.2) |
-| 13.2 | Lighthouse scores (accessibility, best practices, SEO) | M, K, H | Planned |
+| 13.2 | Lighthouse scores (accessibility, best practices, SEO) | M, K, H | K done; H done; M to do |
 
 ### 13.1 Interaction checks
 
@@ -794,7 +794,7 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 **Tasks:**
 - [ ] **M:** `checkers/speed.js` reads all needed categories from one call and returns results for `speed_score` and `lighthouse_score` items. Add the kind to `ai/checklistRules.js` (`cleanParams`: category from the list, `min` 0–100, default 90) and the prompt. Test script run on 2 sites. **~45 min**
 - [x] **K:** `validate.js`: `lighthouse_score: (p) => ['accessibility','best-practices','seo'].includes(p.category) && Number.isFinite(p.min) && p.min >= 0 && p.min <= 100`. **~10 min**
-- [ ] **H:** `checklistKinds.js`: label `lighthouse_score: 'Lighthouse score'`, `describeParams` → `` `Lighthouse ${params.category} score of at least ${params.min}` ``. `fakeApi.js`: add the kind. **~10 min**
+- [x] **H:** `checklistKinds.js`: label `lighthouse_score: 'Lighthouse score'`, `describeParams` → `` `Lighthouse ${params.category} score of at least ${params.min}` ``. `fakeApi.js`: add the kind. **~10 min** Done: harmless if M's part never lands, since the AI then never writes the item.
 - [ ] **All:** move the 5.3 row from "Planned" to done.
 
 **Deploy order:** K's rule must be live **before or together with** M's change. Otherwise the AI writes `lighthouse_score` items that the approve route rejects, and buyers can't approve website checklists. Merge K's PR first, or put both in one PR.

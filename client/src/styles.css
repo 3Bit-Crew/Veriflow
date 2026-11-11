@@ -358,10 +358,9 @@ select {
   font-size: 0.875rem;
 }
 
-.field-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+/* A short value (an amount) doesn't need the full width of the form. */
+.field--narrow {
+  max-width: 220px;
 }
 
 .input {
@@ -373,6 +372,12 @@ select {
   background: var(--surface);
   color: var(--ink);
   transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+/* A long address on a phone ends in "…" instead of being cut mid-word (full text shows while editing). */
+.input[type='email'],
+.input[type='url'] {
+  text-overflow: ellipsis;
 }
 
 .input:focus {
