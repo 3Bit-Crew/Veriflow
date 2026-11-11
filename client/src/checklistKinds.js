@@ -15,6 +15,9 @@ export const KIND_LABELS = {
   lighthouse_score: 'Lighthouse score',
 };
 
+// Lighthouse category ids (PLAN.md 13.2) as a person would write them.
+const LIGHTHOUSE_NAMES = { accessibility: 'accessibility', 'best-practices': 'best practices', seo: 'SEO' };
+
 // One plain sentence saying what the checker will actually test.
 export function describeParams({ kind, params = {} }) {
   switch (kind) {
@@ -41,7 +44,7 @@ export function describeParams({ kind, params = {} }) {
       return `AI will, on ${params.viewport === 'mobile' ? 'mobile' : 'desktop'}: ${params.steps}`;
     case 'lighthouse_score':
       // Google Lighthouse accessibility, best-practices or SEO score, from the same PageSpeed call (PLAN.md 13.2).
-      return `Lighthouse ${params.category} score of at least ${params.min}`;
+      return `Lighthouse ${LIGHTHOUSE_NAMES[params.category] || params.category} score of at least ${params.min}`;
     default:
       return '';
   }

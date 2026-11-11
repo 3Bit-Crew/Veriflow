@@ -153,7 +153,7 @@ export default function JobStatus() {
       )}
 
       {/* Keyed by status so each new state eases in. */}
-      <StatusPanel key={job.status} job={job} countUp={watchedSettle} onReviewed={refresh} />
+      <StatusPanel key={job.status} job={job} events={events} countUp={watchedSettle} onReviewed={refresh} />
 
       <div className="job-layout">
         <div className="stack">
@@ -174,7 +174,34 @@ export default function JobStatus() {
   );
 }
 
-function StatusPanel({ job, countUp, onReviewed }) {
+// Same test as the payout rule (PLAN.md 5.5): unsure, or checked with confidence under 0.7.
+const CONFIDENCE_THRESHOLD = 0.7;
+const isUnsure = (item) => item.status === 'UNSURE' || (isResult(item.status) && !(Number(item.confidence) >= CONFIDENCE_THRESHOLD));
+
+// Why a job is waiting for a person. The checker also sends jobs here when the PayPal
+// payment fails or the check itself breaks, not only when the AI is unsure.
+function reviewReason(job) {
+  const unsure = job.items.filter(isUnsure);
+  if (unsure.length === 1) return `The AI wasn't confident about "${unsure[0].text}".`;
+  if (unsure.length > 1) return `The AI wasn't confident about ${unsure.length} items.`;
+  if (job.items.some((item) => !isResult(item.status))) {
+    return "The automatic check didn't finish, so a person needs to look at the work. The activity log says what happened.";
+  }
+  return "Every item was checked, but the payout couldn't be completed automatically. The activity log says what happened.";
+}
+
+// While a code job waits for its GitHub tests, the checker logs why (PLAN.md 5.6), newest first.
+function waitingReason(events) {
+  const latest = events?.[0];
+  if (latest?.type !== 'CHECK_STARTED') return null;
+  if (latest.data?.waiting) {
+    return { title: 'Waiting for the tests on GitHub', text: latest.message.replace(/^Waiting for GitHub:\s*/, '') };
+  }
+  if (latest.data?.requeued) return { title: 'The check was interrupted. It will run again in a moment.', text: null };
+  return null;
+}
+
+function StatusPanel({ job, events, countUp, onReviewed }) {
   const amount = formatMoney(job.amount, job.currency);
   const submitLink = `/jobs/${job._id}/submit`;
 
@@ -210,15 +237,18 @@ function StatusPanel({ job, countUp, onReviewed }) {
         </div>
       );
 
-    case 'SUBMITTED':
+    case 'SUBMITTED': {
+      const waiting = waitingReason(events);
       return (
-        <div className="card card--held">
+        <div className="card card--held stack">
           <h2 className="loading-title">
             <span className="spinner" aria-hidden="true" />
-            Work submitted. Checks start in a moment.
+            {waiting ? waiting.title : 'Work submitted. Checks start in a moment.'}
           </h2>
+          {waiting?.text && <p className="muted">{waiting.text} {amount} stays held meanwhile.</p>}
         </div>
       );
+    }
 
     case 'CHECKING': {
       const done = job.items.filter((item) => item.status !== 'PENDING').length;
@@ -255,23 +285,25 @@ function StatusPanel({ job, countUp, onReviewed }) {
         <div className="card card--warn stack">
           <div>
             <h2>A person needs to decide the payout</h2>
-            <p>The AI wasn't confident about at least one item. {amount} stays held until someone reviews the evidence below and settles it.</p>
+            <p>{reviewReason(job)} {amount} stays held until someone reviews the evidence below and settles it.</p>
           </div>
           <ReviewBox job={job} onSettled={onReviewed} />
         </div>
       );
 
     case 'SETTLED':
-      return <SettledPanel job={job} countUp={countUp} />;
+      return <SettledPanel job={job} reviewed={events?.some((e) => e.type === 'REVIEW_DECIDED')} countUp={countUp} />;
 
     default:
       return null;
   }
 }
 
-function SettledPanel({ job, countUp }) {
+// `reviewed`: a person set the payout (POST /review), so the checklist alone doesn't explain it.
+function SettledPanel({ job, reviewed, countUp }) {
   const paid = job.payoutAmount ?? 0;
   const returned = Math.max(0, Math.round((job.amount - paid) * 100) / 100);
+  const back = formatMoney(job.settlement === 'VOID' ? job.amount : returned, job.currency);
 
   if (job.settlement === 'VOID') {
     return (
@@ -279,7 +311,9 @@ function SettledPanel({ job, countUp }) {
         <div>
           <h2>Hold cancelled. Nothing was paid.</h2>
           <p className="muted">
-            The work didn't pass any checks, so {formatMoney(job.amount, job.currency)} went back to the buyer.
+            {reviewed
+              ? `A reviewer decided not to pay, so ${back} went back to the buyer.`
+              : `The work didn't pass any checks, so ${back} went back to the buyer.`}
           </p>
         </div>
       </div>
@@ -294,9 +328,10 @@ function SettledPanel({ job, countUp }) {
       <p className="settled__line">released to the worker via PayPal</p>
       {job.settlement === 'PARTIAL' && (
         <p className="muted">
-          The work passed part of the checklist. The other {formatMoney(returned, job.currency)} went back to the buyer.
+          {reviewed ? 'A reviewer set this payout.' : 'The work passed part of the checklist.'} The other {back} went back to the buyer.
         </p>
       )}
+      {job.settlement === 'FULL' && reviewed && <p className="muted">A reviewer approved the full payment.</p>}
     </div>
   );
 }
