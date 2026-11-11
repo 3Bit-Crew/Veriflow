@@ -98,6 +98,9 @@ router.post('/:id/submit', async (req, res) => {
     item.reasoning = undefined;
     item.evidence = undefined;
   }
+  // Count the try here, once per submit. The checker loop must not count it: a server restart
+  // would make it re-check this try and count it again (PLAN.md 5.5 uses attempts for the payout).
+  job.attempts = (job.attempts || 0) + 1;
   job.status = 'SUBMITTED';
   await job.save();
   await logEvent(job._id, 'WORK_SUBMITTED', `Worker ${isRetry ? 'resubmitted' : 'submitted'} ${url}`, { submissionUrl: url });
