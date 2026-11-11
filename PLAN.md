@@ -714,7 +714,7 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 
 **Tasks:**
 - [ ] **M:** `checkers/speed.js` reads all needed categories from one call and returns results for `speed_score` and `lighthouse_score` items. Add the kind to `ai/checklistRules.js` (`cleanParams`: category from the list, `min` 0–100, default 90) and the prompt. Test script run on 2 sites. **~45 min**
-- [ ] **K:** `validate.js`: `lighthouse_score: (p) => ['accessibility','best-practices','seo'].includes(p.category) && Number.isFinite(p.min) && p.min >= 0 && p.min <= 100`. **~10 min**
+- [x] **K:** `validate.js`: `lighthouse_score: (p) => ['accessibility','best-practices','seo'].includes(p.category) && Number.isFinite(p.min) && p.min >= 0 && p.min <= 100`. **~10 min**
 - [ ] **H:** `checklistKinds.js`: label `lighthouse_score: 'Lighthouse score'`, `describeParams` → `` `Lighthouse ${params.category} score of at least ${params.min}` ``. `fakeApi.js`: add the kind. **~10 min**
 - [ ] **All:** move the 5.3 row from "Planned" to done.
 
