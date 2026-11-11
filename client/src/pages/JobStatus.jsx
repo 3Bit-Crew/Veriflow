@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getJob } from '../api.js';
-import ChecklistView from '../components/ChecklistView.jsx';
+import ChecklistView, { withChecking } from '../components/ChecklistView.jsx';
 import ReviewBox from '../components/ReviewBox.jsx';
-import StatusBadge from '../components/StatusBadge.jsx';
+import { CountUp, HoldBar, Icon, StatusPill, Toast } from '../components/ui.jsx';
+import { eventKind, eventLabel } from '../eventKinds.js';
 import { formatMoney, formatTime } from '../format.js';
 
 const POLL_MS = 2000;
-const REVEAL_MS = 150;
+// Results that arrive together are shown one by one, this far apart, so the check reads as progress.
+const REVEAL_MS = 1000;
 const MAX_TRIES = 2; // first try plus one resubmit (PLAN.md 5.5)
-const MONEY_EVENTS = ['PAYPAL_AUTHORIZED', 'PAYPAL_CAPTURED', 'PAYPAL_VOIDED'];
+const FEED_LIMIT = 8;
 
 // Polls GET /api/jobs/:id every 2s until the job is SETTLED. Skips polls while the tab
 // is hidden, keeps the last good data if a poll fails, and backs off while failing.
@@ -56,21 +58,23 @@ function useLiveJob(id) {
     };
   }, [id]);
 
-  return { ...state, refresh: () => refreshRef.current() };
+  const refresh = useCallback(() => refreshRef.current(), []);
+  return { ...state, refresh };
 }
 
 const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
 
-// When several results land in one poll (GitHub reports all of a code job's checks at
-// once), shows them one at a time, 150ms apart, still as "Checking". The job's real
-// status (and the payout panel) only appears after the last result. Presentation only:
-// the data is untouched.
+// When several results land in one poll (the checker saves a job's results together),
+// shows them one at a time, REVEAL_MS apart, still as "Checking": the next item's spinner
+// turns while it waits. The job's real status (and the payout panel) only appears after
+// the last result. Presentation only: the data is untouched.
 function useStaggeredReveal(latest) {
   const [shown, setShown] = useState(latest);
   const shownRef = useRef(latest);
+  const lastRevealRef = useRef(0);
 
   useEffect(() => {
-    if (!latest) return;
+    if (!latest) return undefined;
     const show = (job) => {
       shownRef.current = job;
       setShown(job);
@@ -80,15 +84,20 @@ function useStaggeredReveal(latest) {
     const landed = comparable
       ? latest.items.map((_, i) => i).filter((i) => !isResult(prev.items[i].status) && isResult(latest.items[i].status))
       : [];
-    if (landed.length < 2) {
+    // Nothing new, or a single result long after the previous one (results arriving one by
+    // one already read as progress): show it straight away.
+    const recent = Date.now() - lastRevealRef.current < REVEAL_MS;
+    if (landed.length === 0 || (landed.length === 1 && !recent)) {
+      if (landed.length) lastRevealRef.current = Date.now();
       show(latest);
-      return;
+      return undefined;
     }
 
     let count = 0;
     let timer;
     const step = () => {
       count += 1;
+      lastRevealRef.current = Date.now();
       if (count > landed.length) {
         show(latest);
         return;
@@ -101,77 +110,14 @@ function useStaggeredReveal(latest) {
       });
       timer = setTimeout(step, REVEAL_MS);
     };
-    step();
+    // A poll can arrive mid-reveal and restart this effect: keep the full gap since the
+    // last result shown, so results don't bunch up every time the page polls.
+    const wait = Math.max(0, REVEAL_MS - (Date.now() - lastRevealRef.current));
+    timer = setTimeout(step, wait);
     return () => clearTimeout(timer);
   }, [latest]);
 
   return shown && latest && shown._id === latest._id ? shown : latest;
-}
-
-export default function JobStatus() {
-  const { id } = useParams();
-  const { data, error, refresh } = useLiveJob(id);
-  const revealed = useStaggeredReveal(data?.job);
-
-  // The status when this page first loaded, so the payout only counts up when the
-  // job settles while someone is watching, not every time a settled job is opened.
-  const firstSeen = useRef({ id: null, status: null });
-  if (data && firstSeen.current.id !== id) firstSeen.current = { id, status: data.job.status };
-
-  if (!data) {
-    if (error) {
-      return (
-        <section className="page page--narrow">
-          <h1>{error.status === 404 ? 'Job not found' : "Couldn't load this job"}</h1>
-          <p className="form-error" role="alert">{error.message}</p>
-          <Link className="button" to="/dashboard">Go to the dashboard</Link>
-        </section>
-      );
-    }
-    return <section className="page"><p className="muted">Loading…</p></section>;
-  }
-
-  const { events } = data;
-  const job = revealed;
-  const watchedSettle = job.status === 'SETTLED' && firstSeen.current.status !== 'SETTLED';
-
-  return (
-    <section className="page job-page">
-      <div className="stack stack--tight">
-        <div className="page-heading">
-          <h1>{job.title}</h1>
-          <StatusBadge status={job.status} />
-        </div>
-        <p className="job-meta">
-          {formatMoney(job.amount, job.currency)} · {job.type === 'code' ? 'Code (GitHub pull request)' : 'Website'}
-          {job.attempts > 0 && ` · Try ${Math.min(job.attempts, MAX_TRIES)} of ${MAX_TRIES}`}
-        </p>
-      </div>
-
-      {error && (
-        <p className="notice" role="status">Lost connection to the server. Retrying…</p>
-      )}
-
-      {/* Keyed by status so each new state eases in. */}
-      <StatusPanel key={job.status} job={job} events={events} countUp={watchedSettle} onReviewed={refresh} />
-
-      <div className="job-layout">
-        <div className="stack">
-          <ChecklistHeader job={job} />
-          {job.items.length > 0 ? (
-            <ChecklistView job={job} />
-          ) : (
-            <p className="muted">No checklist yet.</p>
-          )}
-        </div>
-
-        <aside className="stack">
-          <JobDetails job={job} />
-          <Activity events={events} />
-        </aside>
-      </div>
-    </section>
-  );
 }
 
 // Same test as the payout rule (PLAN.md 5.5): unsure, or checked with confidence under 0.7.
@@ -201,228 +147,381 @@ function waitingReason(events) {
   return null;
 }
 
-function StatusPanel({ job, events, countUp, onReviewed }) {
-  const amount = formatMoney(job.amount, job.currency);
-  const submitLink = `/jobs/${job._id}/submit`;
+const LIFE = ['Checklist', 'Held', 'Submitted', 'Checked', 'Settled'];
+const LIFE_INDEX = { DRAFT: 0, CHECKLIST_READY: 1, FUNDED: 2, SUBMITTED: 3, CHECKING: 3, CHANGES_REQUESTED: 3, NEEDS_REVIEW: 4, SETTLED: 5 };
 
-  switch (job.status) {
-    case 'DRAFT':
-    case 'CHECKLIST_READY':
-      return (
-        <div className="card stack">
-          <div>
-            <h2>{job.status === 'DRAFT' ? 'Finish the checklist' : `Hold ${amount} on PayPal`}</h2>
-            <p className="muted">
-              {job.status === 'DRAFT'
-                ? 'The checklist needs approving before the payment can be held.'
-                : 'The checklist is approved. Hold the payment so the worker can start.'}
-            </p>
-          </div>
-          <div className="actions">
-            <Link className="button button--primary" to={`/jobs/new?job=${job._id}`}>Continue setting up</Link>
-          </div>
-        </div>
-      );
+export default function JobStatus() {
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { data, error, refresh } = useLiveJob(id);
+  const revealed = useStaggeredReveal(data?.job);
+  const [toast, setToast] = useState(() => (location.state?.toast === 'held' ? { type: 'held' } : null));
 
-    case 'FUNDED':
-      return (
-        <div className="card card--held stack">
-          <div>
-            <h2>{amount} is held on PayPal</h2>
-            <p className="muted">Waiting for the worker to submit their work.</p>
-          </div>
-          <div className="actions">
-            <Link className="button button--primary" to={submitLink}>Submit work</Link>
-          </div>
-        </div>
-      );
+  // Show the "held" toast once: drop it from history so a reload doesn't repeat it.
+  useEffect(() => {
+    if (location.state?.toast) navigate(location.pathname, { replace: true, state: null });
+  }, [location, navigate]);
 
-    case 'SUBMITTED': {
-      const waiting = waitingReason(events);
+  // The status when this page first loaded, so the payout only counts up when the
+  // job settles while someone is watching, not every time a settled job is opened.
+  const firstSeen = useRef({ id: null, status: null });
+  if (data && firstSeen.current.id !== id) firstSeen.current = { id, status: data.job.status };
+
+  const closeToast = useCallback(() => setToast(null), []);
+
+  if (!data) {
+    if (error) {
       return (
-        <div className="card card--held stack">
-          <h2 className="loading-title">
-            <span className="spinner" aria-hidden="true" />
-            {waiting ? waiting.title : 'Work submitted. Checks start in a moment.'}
-          </h2>
-          {waiting?.text && <p className="muted">{waiting.text} {amount} stays held meanwhile.</p>}
-        </div>
+        <section className="page page--narrow">
+          <div className="card empty-state">
+            <h1>{error.status === 404 ? 'Job not found' : "Couldn't load this job"}</h1>
+            <p role="alert">{error.message}</p>
+            <Link className="btn btn--primary" to="/dashboard">Go to the dashboard</Link>
+          </div>
+        </section>
       );
     }
-
-    case 'CHECKING': {
-      const done = job.items.filter((item) => item.status !== 'PENDING').length;
-      const total = job.items.length;
-      return (
-        <div className="card card--held stack">
-          <h2 className="loading-title">
-            <span className="spinner" aria-hidden="true" />
-            Checking try {job.attempts} of {MAX_TRIES}
-          </h2>
-          <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
-            <span className="progress__bar" style={{ transform: `scaleX(${total ? done / total : 0})` }} />
-          </div>
-          <p className="muted tabular">{done} of {total} checked · {amount} stays held until the checks finish</p>
-        </div>
-      );
-    }
-
-    case 'CHANGES_REQUESTED':
-      return (
-        <div className="card card--warn stack">
-          <div>
-            <h2>Changes requested. {amount} is still held.</h2>
-            <p>The first try didn't pass every check. The worker has one more try to fix it.</p>
-          </div>
-          <div className="actions">
-            <Link className="button button--primary" to={submitLink}>Submit fixed work</Link>
-          </div>
-        </div>
-      );
-
-    case 'NEEDS_REVIEW':
-      return (
-        <div className="card card--warn stack">
-          <div>
-            <h2>A person needs to decide the payout</h2>
-            <p>{reviewReason(job)} {amount} stays held until someone reviews the evidence below and settles it.</p>
-          </div>
-          <ReviewBox job={job} onSettled={onReviewed} />
-        </div>
-      );
-
-    case 'SETTLED':
-      return <SettledPanel job={job} reviewed={events?.some((e) => e.type === 'REVIEW_DECIDED')} countUp={countUp} />;
-
-    default:
-      return null;
-  }
-}
-
-// `reviewed`: a person set the payout (POST /review), so the checklist alone doesn't explain it.
-function SettledPanel({ job, reviewed, countUp }) {
-  const paid = job.payoutAmount ?? 0;
-  const returned = Math.max(0, Math.round((job.amount - paid) * 100) / 100);
-  const back = formatMoney(job.settlement === 'VOID' ? job.amount : returned, job.currency);
-
-  if (job.settlement === 'VOID') {
     return (
-      <div className="card stack">
-        <div>
-          <h2>Hold cancelled. Nothing was paid.</h2>
-          <p className="muted">
-            {reviewed
-              ? `A reviewer decided not to pay, so ${back} went back to the buyer.`
-              : `The work didn't pass any checks, so ${back} went back to the buyer.`}
-          </p>
-        </div>
-      </div>
+      <section className="page">
+        <p className="loading-line"><span className="spin" />Loading…</p>
+      </section>
     );
   }
 
+  const { events } = data;
+  const job = revealed;
+  const watchedSettle = job.status === 'SETTLED' && firstSeen.current.status !== 'SETTLED';
+  const reviewed = events?.some((e) => e.type === 'REVIEW_DECIDED');
+  const lifeIndex = LIFE_INDEX[job.status] ?? 0;
+
+  function handleSettled(payout) {
+    setToast({ type: 'settled', amount: payout });
+    refresh();
+  }
+
   return (
-    <div className="card card--good settled">
-      <p className="settled__amount">
-        <CountUp value={paid} currency={job.currency} animate={countUp} />
-      </p>
-      <p className="settled__line">released to the worker via PayPal</p>
-      {job.settlement === 'PARTIAL' && (
-        <p className="muted">
-          {reviewed ? 'A reviewer set this payout.' : 'The work passed part of the checklist.'} The other {back} went back to the buyer.
-        </p>
-      )}
-      {job.settlement === 'FULL' && reviewed && <p className="muted">A reviewer approved the full payment.</p>}
-    </div>
-  );
-}
+    <section className="page fade job-page">
+      <Link className="btn btn--ghost btn--sm back" to="/dashboard">
+        <Icon name="back" size={14} />
+        Dashboard
+      </Link>
 
-// Counts a money amount up from zero once, for the moment a payout lands.
-function CountUp({ value, currency, animate }) {
-  const [shown, setShown] = useState(animate ? 0 : value);
-
-  useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!animate || reduce) {
-      setShown(value);
-      return;
-    }
-    const duration = 900;
-    const start = performance.now();
-    let frame;
-    const step = (now) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 4); // strong ease-out: fast start, gentle landing
-      setShown(t === 1 ? value : Math.floor(value * eased * 100) / 100);
-      if (t < 1) frame = requestAnimationFrame(step);
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [value, animate]);
-
-  return <span className="tabular">{formatMoney(shown, currency)}</span>;
-}
-
-function ChecklistHeader({ job }) {
-  const checked = job.items.filter((item) => ['PASS', 'FAIL', 'UNSURE'].includes(item.status));
-  const passedWeight = job.items.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
-  return (
-    <div className="section-heading">
-      <h2>Checklist</h2>
-      {checked.length > 0 && <span className="muted tabular">{passedWeight}% of the work passed</span>}
-    </div>
-  );
-}
-
-function JobDetails({ job }) {
-  return (
-    <div className="card card--quiet stack">
-      <div>
-        <p className="label">What the buyer asked for</p>
-        <p className="prewrap">{job.description}</p>
-      </div>
-      <dl className="details">
-        {job.submissionUrl && (
-          <div>
-            <dt>Submitted work</dt>
-            <dd className="break-anywhere">
-              <a href={job.submissionUrl} target="_blank" rel="noreferrer">{job.submissionUrl}</a>
-            </dd>
-          </div>
-        )}
-        {job.repoUrl && (
-          <div>
-            <dt>Repo</dt>
-            <dd className="break-anywhere">{job.repoUrl.replace('https://github.com/', '')}</dd>
-          </div>
-        )}
+      <div className="jh">
         <div>
-          <dt>Worker</dt>
-          <dd className="break-anywhere">{job.workerEmail}</dd>
-        </div>
-        {job.paypalAuthId && (
-          <div>
-            <dt>PayPal authorization</dt>
-            <dd className="break-anywhere mono">{job.paypalAuthId}</dd>
+          <div className="jh__title page-heading">
+            <h1>{job.title}</h1>
+            <StatusPill status={job.status} />
           </div>
+          <div className="jh__meta job-meta">
+            <span>
+              <Icon name={job.type === 'code' ? 'code' : 'globe'} size={14} />
+              {job.type === 'code' ? 'Code · GitHub pull request' : 'Website · live URL'}
+            </span>
+            {job.attempts > 0 && (
+              <>
+                <i className="dot" />
+                <span>Try {Math.min(job.attempts, MAX_TRIES)} of {MAX_TRIES}</span>
+              </>
+            )}
+            <i className="dot" />
+            <span className="mono" style={{ fontSize: 12 }}>{formatMoney(job.amount, job.currency)}</span>
+          </div>
+        </div>
+        {job.submissionUrl && (
+          <a className="btn btn--sm" href={job.submissionUrl} target="_blank" rel="noreferrer">
+            <Icon name="ext" size={13} />
+            {job.type === 'code' ? 'Pull request' : 'Open site'}
+          </a>
         )}
+      </div>
+
+      {error && <p className="notice" role="status" style={{ marginBottom: 16 }}>Lost connection to the server. Retrying…</p>}
+
+      <ol className="card life" aria-label="Job progress">
+        {LIFE.map((label, i) => (
+          <Fragment key={label}>
+            {i > 0 && <li className={`life__line${i < lifeIndex ? ' done' : ''}`} aria-hidden="true" />}
+            <li className={`life__s${i < lifeIndex ? ' done' : i === lifeIndex ? ' on' : ''}`} aria-current={i === lifeIndex ? 'step' : undefined}>
+              <b aria-hidden="true">{i < lifeIndex && <Icon name="check" size={10} stroke={3} />}</b>
+              {label}
+            </li>
+          </Fragment>
+        ))}
+      </ol>
+
+      <div className="job">
+        <div style={{ minWidth: 0 }}>
+          <Vault
+            key={job.status}
+            job={job}
+            events={events}
+            reviewed={reviewed}
+            countUp={watchedSettle}
+            onSettled={handleSettled}
+          />
+
+          <div className="card brief">
+            <span className="eyebrow">What the buyer asked for</span>
+            <p className="brief__text">{job.description}</p>
+          </div>
+
+          <div className="section-title">
+            <h2>
+              Checklist <span className="muted mono">{job.items.length} items · contract</span>
+            </h2>
+            {job.items.some((item) => isResult(item.status)) && (
+              <span className="muted" style={{ fontSize: 12.5 }}>Open a result to see the evidence</span>
+            )}
+          </div>
+          {job.items.length > 0 ? <ChecklistView key={job._id} job={job} /> : <p className="muted">No checklist yet.</p>}
+        </div>
+
+        <aside className="side">
+          <Details job={job} />
+          <Activity events={events} live={job.status !== 'SETTLED'} />
+        </aside>
+      </div>
+
+      {toast?.type === 'held' && (
+        <Toast onDone={closeToast}>
+          <b>✓ Held</b>
+          {formatMoney(job.amount, job.currency)} is authorized on PayPal. Share the job link with the worker.
+        </Toast>
+      )}
+      {toast?.type === 'settled' && (
+        <Toast onDone={closeToast}>
+          <b>✓ Settled</b>
+          {toast.amount > 0 ? `PayPal paid ${formatMoney(toast.amount, job.currency)} to the worker.` : 'PayPal cancelled the hold.'}
+        </Toast>
+      )}
+    </section>
+  );
+}
+
+// The dark money card: what's held or paid, the hold bar, and the next step for this status.
+function Vault({ job, events, reviewed, countUp, onSettled }) {
+  const items = withChecking(job);
+  const amount = formatMoney(job.amount, job.currency);
+  const passed = job.items.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
+  const settled = job.status === 'SETTLED';
+  const notHeld = job.status === 'DRAFT' || job.status === 'CHECKLIST_READY';
+  const paid = job.payoutAmount ?? 0;
+  const back = Math.max(0, Math.round((job.amount - paid) * 100) / 100);
+  const message = statusMessage(job, events, reviewed, back);
+
+  return (
+    <div className="vault jv">
+      <div className="jv__top">
+        <div style={{ minWidth: 0 }}>
+          <div className="muted jv__label">{settled ? 'Released to the worker' : notHeld ? 'To be held' : 'Held in escrow'}</div>
+          <div className="vault__amt jv__amt settled__amount">
+            {settled ? <CountUp value={paid} currency={job.currency} animate={countUp} /> : amount}
+            <small>USD</small>
+          </div>
+          {settled && (
+            <div className="muted mono jv__of">
+              of {amount} · {formatMoney(job.settlement === 'VOID' ? job.amount : back, job.currency)} released to the buyer
+            </div>
+          )}
+        </div>
+        {settled ? (
+          <span className="lock lock--settled">Settled</span>
+        ) : notHeld ? (
+          <span className="eyebrow">Not held</span>
+        ) : (
+          <span className="lock"><b />PayPal hold</span>
+        )}
+      </div>
+
+      {items.length > 0 && (
+        <>
+          <div className="jv__bar"><HoldBar items={items} dark height={16} gap={4} /></div>
+          <div className="jv__legend">
+            <span><i style={{ background: 'var(--lime)' }} />Passed {passed}%</span>
+            <span><i style={{ background: 'var(--unsure)' }} />Unsure</span>
+            <span><i style={{ background: 'var(--fail)' }} />Failed</span>
+            <span><i style={{ background: '#2C3833' }} />Not checked</span>
+          </div>
+        </>
+      )}
+
+      <div className="jv__msg">
+        <div style={{ minWidth: 0 }}>
+          <h2>
+            {message.busy && <span className="spin spin--dark" aria-hidden="true" />}
+            {message.title}
+          </h2>
+          {message.text && <p className="muted">{message.text}</p>}
+        </div>
+        {notHeld && (
+          <Link className="btn btn--lime" to={`/jobs/new?job=${job._id}`}>
+            {job.status === 'DRAFT' ? 'Finish the checklist' : `Hold ${amount} on PayPal`}
+          </Link>
+        )}
+      </div>
+
+      {job.status === 'NEEDS_REVIEW' && <ReviewBox job={job} onSettled={onSettled} />}
+      {(job.status === 'FUNDED' || job.status === 'CHANGES_REQUESTED') && <WorkerLink job={job} />}
+    </div>
+  );
+}
+
+function statusMessage(job, events, reviewed, back) {
+  const amount = formatMoney(job.amount, job.currency);
+  const backText = formatMoney(job.settlement === 'VOID' ? job.amount : back, job.currency);
+  const done = job.items.filter((item) => isResult(item.status)).length;
+
+  switch (job.status) {
+    case 'DRAFT':
+      return { title: 'Finish the checklist', text: 'The checklist needs approving before the payment can be held.' };
+    case 'CHECKLIST_READY':
+      return { title: 'Waiting for the buyer to hold the payment', text: 'The checklist is approved. Nothing is held yet.' };
+    case 'FUNDED':
+      return { title: 'Held on PayPal. Waiting for the work.', text: 'Send the worker the link below. Checks start as soon as they submit.' };
+    case 'SUBMITTED': {
+      const waiting = waitingReason(events);
+      if (waiting) return { busy: true, title: waiting.title, text: waiting.text && `${waiting.text} ${amount} stays held meanwhile.` };
+      return { busy: true, title: 'Work submitted. Checks start in a moment.', text: job.submissionUrl };
+    }
+    case 'CHECKING':
+      return {
+        busy: true,
+        title: `Checking try ${job.attempts} of ${MAX_TRIES}`,
+        text: `${done} of ${job.items.length} checked · ${amount} stays held until every check finishes`,
+      };
+    case 'CHANGES_REQUESTED':
+      return {
+        title: `Changes requested. ${amount} is still held.`,
+        text: "The first try didn't pass every check. The worker has one more try to fix it.",
+      };
+    case 'NEEDS_REVIEW':
+      return {
+        title: 'A person needs to decide the payout',
+        text: `${reviewReason(job)} ${amount} stays held until someone reviews the evidence below and settles it.`,
+      };
+    case 'SETTLED':
+      if (job.settlement === 'VOID') {
+        return {
+          title: 'Hold cancelled. Nothing was paid.',
+          text: reviewed
+            ? `A reviewer decided not to pay, so ${backText} went back to the buyer.`
+            : `The work didn't pass any checks, so ${backText} went back to the buyer.`,
+        };
+      }
+      if (job.settlement === 'PARTIAL') {
+        return {
+          title: 'Partly paid for what passed.',
+          text: `${reviewed ? 'A reviewer set this payout.' : 'The work passed part of the checklist.'} The other ${backText} went back to the buyer.`,
+        };
+      }
+      return {
+        title: reviewed ? 'Paid in full.' : 'Every check passed. Paid in full.',
+        text: reviewed ? 'A reviewer approved the full payment.' : 'Captured to the worker via PayPal.',
+      };
+    default:
+      return { title: '', text: '' };
+  }
+}
+
+// The link the buyer sends to the worker. Work is only submitted on that page, never here.
+function WorkerLink({ job }) {
+  const [copied, setCopied] = useState(false);
+  const path = `/jobs/${job._id}/submit`;
+  const link = `${window.location.origin}${path}`;
+  const isRetry = job.status === 'CHANGES_REQUESTED';
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked: the link is still shown for copying by hand.
+    }
+  }
+
+  return (
+    <div className="review worker-link">
+      <label className="eyebrow" htmlFor="submit-link">
+        {isRetry ? 'The worker resubmits the fix here' : 'Send the worker this link to submit their work'}
+      </label>
+      <div className="copy-row" style={{ marginTop: 10 }}>
+        <input id="submit-link" className="input dark-input" readOnly value={link} onFocus={(e) => e.target.select()} />
+        <button type="button" className="btn btn--on-dark" onClick={copy}>
+          <Icon name="copy" size={14} />
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <Link className="btn btn--lime" to={path}>
+          Open submit page
+          <Icon name="arrow" size={14} />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function Details({ job }) {
+  const rows = [
+    ['Amount', `${formatMoney(job.amount, job.currency)} ${job.currency || 'USD'}`],
+    ['Worker', job.workerEmail],
+    job.repoUrl && ['Repo', job.repoUrl.replace('https://github.com/', '')],
+    [
+      'Submission',
+      job.submissionUrl ? (
+        <a href={job.submissionUrl} target="_blank" rel="noreferrer">{job.submissionUrl.replace(/^https?:\/\//, '')}</a>
+      ) : (
+        '—'
+      ),
+    ],
+    ['PayPal order', job.paypalOrderId || '—'],
+    job.paypalAuthId && ['Authorization', job.paypalAuthId],
+    ['Created', formatTime(job.createdAt) || '—'],
+  ].filter(Boolean);
+
+  return (
+    <div className="card side__c">
+      <h2>Details</h2>
+      <dl style={{ margin: 0 }}>
+        {rows.map(([label, value]) => (
+          <div className="kv" key={label}>
+            <dt>{label}</dt>
+            <dd title={typeof value === 'string' ? value : undefined}>{value}</dd>
+          </div>
+        ))}
       </dl>
     </div>
   );
 }
 
-function Activity({ events }) {
+function Activity({ events, live }) {
+  const [all, setAll] = useState(false);
   if (!events?.length) return null;
+  const shown = all ? events : events.slice(0, FEED_LIMIT);
+
   return (
-    <div className="card card--quiet stack">
-      <h2>Activity</h2>
-      <ol className="activity">
-        {events.map((event) => (
-          <li key={event._id} className={MONEY_EVENTS.includes(event.type) ? 'activity__item activity__item--money' : 'activity__item'}>
-            <span className="activity__message">{event.message}</span>
-            <time className="activity__time" dateTime={event.createdAt}>{formatTime(event.createdAt)}</time>
+    <div className="card side__c">
+      <h2>
+        Activity
+        {live && <span className="live"><b />live</span>}
+      </h2>
+      <ol className="feed activity">
+        {shown.map((event) => (
+          <li key={event._id} className={`feed__i activity__item ${eventKind(event.type)}`}>
+            <b aria-hidden="true" />
+            <div style={{ minWidth: 0 }}>
+              <strong>{eventLabel(event.type)}</strong>
+              <p className="activity__message">{event.message}</p>
+              <time dateTime={event.createdAt}>{formatTime(event.createdAt)}</time>
+            </div>
           </li>
         ))}
       </ol>
+      {events.length > FEED_LIMIT && (
+        <button type="button" className="link-button feed__more" onClick={() => setAll((v) => !v)}>
+          {all ? 'Show fewer' : `Show all ${events.length}`}
+        </button>
+      )}
     </div>
   );
 }

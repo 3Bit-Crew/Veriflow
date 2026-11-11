@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { createJob, generateChecklist, getJob } from '../api.js';
-import ChecklistEditor from '../components/ChecklistEditor.jsx';
+import ChecklistEditor, { CompositionBar } from '../components/ChecklistEditor.jsx';
 import PayPalButton from '../components/PayPalButton.jsx';
+import { Icon } from '../components/ui.jsx';
 import { formatMoney } from '../format.js';
 
 const STEPS = ['Describe the job', 'Approve the checklist', 'Hold the payment'];
@@ -21,6 +22,24 @@ const PLACEHOLDERS = {
   website: 'Landing page with the headline "Fresh every morning" and a signup form with an email field and a "Sign up" button. Must look good on mobile.',
 };
 
+// "Fill with an example": the two demo jobs (demo/README.md).
+const EXAMPLES = {
+  code: {
+    title: 'Add coupon codes to the checkout',
+    description: "Add coupon codes to src/checkout.js: SAVE10 = 10% off the items, FREESHIP = free shipping. Totals must be correct to the cent. Don't change anything in src/payment/.",
+    repoUrl: 'https://github.com/3Bit-Crew/veriflow-demo',
+  },
+  website: {
+    title: 'Bakery landing page',
+    description: 'Landing page for my bakery with the headline "Fresh every morning", a signup form with an email field and a "Sign up" button. Signing up shows a thank-you message. Must look good on mobile.',
+  },
+};
+
+const TYPES = [
+  { value: 'code', icon: 'code', title: 'Code', text: 'GitHub pull request, checked by tests and diffs' },
+  { value: 'website', icon: 'globe', title: 'Website', text: 'Live URL, checked in a real browser' },
+];
+
 // Which step a job is on, from its status (PLAN.md 5.1).
 function stepFor(job) {
   if (!job || job.status === 'DRAFT') return job?.items.length ? 1 : 0;
@@ -32,19 +51,29 @@ function stepFor(job) {
 // at the right step instead of starting over.
 export default function NewJob() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const jobId = searchParams.get('job');
   const [job, setJob] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
+  const [values, setValues] = useState({
+    title: '',
+    description: '',
+    type: 'code',
+    amount: '200',
+    workerEmail: SANDBOX_WORKER_EMAIL,
+    repoUrl: '',
+  });
+  const [draftItems, setDraftItems] = useState(null); // live edits from the checklist editor, for the receipt
 
   useEffect(() => {
     if (!jobId) {
       setJob(null);
       setLoadError(null);
-      return;
+      return undefined;
     }
-    if (job?._id === jobId) return;
+    if (job?._id === jobId) return undefined;
     let active = true;
     getJob(jobId)
       .then((result) => active && setJob(result.job))
@@ -54,6 +83,13 @@ export default function NewJob() {
     };
     // Only the URL drives loading; `job` is read to skip a reload we caused ourselves.
   }, [jobId]);
+
+  const step = stepFor(job);
+
+  // Once the money is held, the job page takes over (with a confirmation toast).
+  useEffect(() => {
+    if (job && step === 3) navigate(`/jobs/${job._id}`, { replace: true, state: { toast: 'held' } });
+  }, [job, step, navigate]);
 
   async function runGenerate(id) {
     setGenerating(true);
@@ -67,86 +103,91 @@ export default function NewJob() {
     }
   }
 
-  async function handleCreate(values) {
-    const created = await createJob(values);
+  async function handleCreate(form) {
+    const created = await createJob(form);
     setJob(created);
     setSearchParams({ job: created._id }, { replace: true });
     await runGenerate(created._id);
   }
 
+  const handleDraft = useCallback((items) => setDraftItems(items), []);
+
   if (loadError) {
     return (
       <section className="page page--narrow">
-        <h1>Couldn't open this job</h1>
-        <p className="form-error" role="alert">{loadError}</p>
-        <Link className="button" to="/jobs/new">Start a new job</Link>
+        <div className="card empty-state">
+          <h1>Couldn't open this job</h1>
+          <p role="alert">{loadError}</p>
+          <Link className="btn btn--primary" to="/jobs/new">Start a new job</Link>
+        </div>
       </section>
     );
   }
-  if (jobId && !job) return <section className="page page--narrow"><p className="muted">Loading…</p></section>;
+  if (jobId && !job) {
+    return (
+      <section className="page">
+        <p className="loading-line"><span className="spin" />Loading…</p>
+      </section>
+    );
+  }
 
-  const step = stepFor(job);
+  const shownStep = Math.min(step === 0 && job ? 1 : step, 2);
 
   return (
-    <section className="page page--narrow">
-      <h1>Create a job</h1>
-      <Stepper current={step} />
+    <section className="page fade">
+      <div className="ph" style={{ marginBottom: 0 }}>
+        <div>
+          <span className="eyebrow">New escrow</span>
+          <h1 style={{ marginTop: 8 }}>Create a job</h1>
+        </div>
+      </div>
+      <Stepper current={shownStep} />
 
-      {job && <JobSummary job={job} />}
+      <div className="create">
+        <div>
+          {step === 0 && !job && <JobDetailsForm values={values} setValues={setValues} onSubmit={handleCreate} />}
 
-      {step === 0 && !job && <JobDetailsForm onSubmit={handleCreate} />}
-
-      {step === 0 && job && (
-        <div className="card stack" aria-live="polite">
-          {generating ? (
-            <>
-              <h2 className="loading-title">
-                <span className="spinner" aria-hidden="true" />
-                Writing your checklist…
-              </h2>
-              <p className="muted">AI is turning your description into checks. This can take a few seconds.</p>
-            </>
-          ) : (
-            <>
-              <h2>Generate the checklist</h2>
-              {generateError && <p className="form-error" role="alert">{generateError}</p>}
-              <div className="actions">
-                <button type="button" className="button button--primary" onClick={() => runGenerate(job._id)}>
-                  {generateError ? 'Try again' : 'Generate checklist'}
-                </button>
+          {step === 0 && job && (
+            <div className="card form fade" aria-live="polite">
+              <div className="form__head">
+                <div>
+                  <h2>Review the checklist</h2>
+                  <p className="muted">Each item is checked automatically. Its weight is its share of the payment if the work only partly passes.</p>
+                </div>
               </div>
-            </>
+              {generating ? (
+                <div className="gen">
+                  <p className="loading-line" style={{ fontSize: 13 }}>
+                    <span className="spin" />
+                    AI is turning your description into checks…
+                  </p>
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="gen__ln" style={{ animationDelay: `${i * 0.1}s` }} />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {generateError && <p className="form-error" role="alert">{generateError}</p>}
+                  <div className="form__foot">
+                    <span className="muted" style={{ fontSize: 13 }}>The AI writes the checklist from your description.</span>
+                    <div className="actions">
+                      <button type="button" className="btn btn--primary" onClick={() => runGenerate(job._id)}>
+                        {generateError ? 'Try again' : 'Generate checklist'} <Icon name="spark" size={15} />
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {step === 1 && (
-        <div className="card stack">
-          <div>
-            <h2>Review the checklist</h2>
-            <p className="muted">
-              Each item is checked automatically. Its weight is the share of the payment it's worth if the
-              work only partly passes.
-            </p>
-          </div>
-          <ChecklistEditor job={job} onApproved={setJob} />
-        </div>
-      )}
+          {step === 1 && <ChecklistEditor job={job} onApproved={setJob} onChange={handleDraft} />}
 
-      {step === 2 && (
-        <div className="card stack">
-          <div>
-            <h2>Hold {formatMoney(job.amount, job.currency)} on PayPal</h2>
-            <p className="muted">
-              You approve the payment on PayPal, but you're not charged yet. The money is only released
-              for checklist items the work passes.
-            </p>
-          </div>
-          <PayPalButton job={job} onAuthorized={setJob} />
+          {step === 2 && <HoldStep job={job} onAuthorized={setJob} />}
         </div>
-      )}
 
-      {step === 3 && <Done job={job} />}
+        <Receipt job={job} values={values} items={step === 1 ? draftItems : job?.items} ready={step === 2} />
+      </div>
     </section>
   );
 }
@@ -155,56 +196,112 @@ function Stepper({ current }) {
   return (
     <ol className="stepper">
       {STEPS.map((label, index) => {
-        const state = index < current ? 'done' : index === current ? 'current' : 'todo';
+        const state = index < current ? 'done' : index === current ? 'on' : '';
         return (
-          <li key={label} className={`stepper__step stepper__step--${state}`} aria-current={state === 'current' ? 'step' : undefined}>
-            <span className="stepper__number" aria-hidden="true">{state === 'done' ? '✓' : index + 1}</span>
-            <span>{label}</span>
-          </li>
+          <Fragment key={label}>
+            {index > 0 && <li className="stepper__sep" aria-hidden="true" />}
+            <li className={`stepper__i ${state}`} aria-current={state === 'on' ? 'step' : undefined}>
+              <b aria-hidden="true">{state === 'done' ? <Icon name="check" size={12} stroke={2.4} /> : index + 1}</b>
+              {label}
+            </li>
+          </Fragment>
         );
       })}
     </ol>
   );
 }
 
-function JobSummary({ job }) {
+// The dark "contract" card: what the buyer is agreeing to, updated as they type and edit.
+function Receipt({ job, values, items, ready }) {
+  const source = job || values;
+  const amount = Number(job ? job.amount : values.amount) || 0;
+  const list = items || [];
+  const total = list.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+  const type = source.type;
+  const repo = (job ? job.repoUrl : values.repoUrl) || '';
+
   return (
-    <dl className="summary">
-      <div>
-        <dt>Job</dt>
-        <dd>{job.title}</dd>
+    <aside className="vault receipt" aria-label="Contract summary">
+      <div className="receipt__head">
+        <span className="eyebrow">Contract</span>
+        {ready ? (
+          <span className="lock"><b />Ready to hold</span>
+        ) : (
+          <span className="eyebrow">{job ? 'Draft' : 'Not saved yet'}</span>
+        )}
       </div>
-      <div>
-        <dt>Amount</dt>
-        <dd className="tabular">{formatMoney(job.amount, job.currency)}</dd>
+      <div className="vault__amt receipt__amt">
+        {formatMoney(amount, job?.currency)}
+        <small>USD</small>
       </div>
-      <div>
-        <dt>Worker</dt>
-        <dd className="break-anywhere">{job.workerEmail}</dd>
-      </div>
-      {job.repoUrl && (
-        <div>
-          <dt>Repo</dt>
-          <dd className="break-anywhere">{job.repoUrl.replace('https://github.com/', '')}</dd>
+      <div className="muted receipt__title">{source.title?.trim() || 'Untitled job'}</div>
+      {list.length > 0 ? (
+        <CompositionBar items={list} height={10} dark />
+      ) : (
+        <div className="hold hold--dark" style={{ height: 10 }}>
+          <div className="hold__seg" style={{ flexGrow: 1 }} />
         </div>
       )}
-    </dl>
+      <div style={{ marginTop: 18 }}>
+        <div className="receipt__line"><span>Type</span><span>{type === 'code' ? 'Code · PR' : 'Website · URL'}</span></div>
+        <div className="receipt__line"><span>Worker</span><span title={source.workerEmail}>{source.workerEmail || '—'}</span></div>
+        {type === 'code' && (
+          <div className="receipt__line"><span>Repo</span><span>{repo.replace('https://github.com/', '') || '—'}</span></div>
+        )}
+        <div className="receipt__line">
+          <span>Checklist</span>
+          <span>{list.length ? `${list.length} items · ${total}%` : '—'}</span>
+        </div>
+        <div className="receipt__line"><span>Retries</span><span>1 resubmit</span></div>
+        <div className="receipt__line"><span>Human review</span><span>if confidence &lt; 70%</span></div>
+      </div>
+    </aside>
   );
 }
 
-function JobDetailsForm({ onSubmit }) {
-  const [values, setValues] = useState({
-    title: '',
-    description: '',
-    type: 'code',
-    amount: '',
-    workerEmail: SANDBOX_WORKER_EMAIL,
-    repoUrl: '',
-  });
+function HoldStep({ job, onAuthorized }) {
+  const amount = formatMoney(job.amount, job.currency);
+  const timeline = [
+    ['Now', `PayPal authorizes ${amount} from your account`, 'lock'],
+    ['When work is submitted', 'Each checklist item is checked against evidence', 'eye'],
+    ['After the checks', 'PayPal captures what passed. The rest of the hold is released to you.', 'shield'],
+  ];
+  return (
+    <div className="card form fade">
+      <div className="form__head">
+        <div>
+          <h2>Hold {amount} on PayPal</h2>
+          <p className="muted">PayPal authorizes the amount and holds it. Nothing is captured until the checks finish.</p>
+        </div>
+      </div>
+      <div className="timeline">
+        {timeline.map(([when, what, icon]) => (
+          <div className="timeline__i" key={when}>
+            <span className="icon-box"><Icon name={icon} size={16} /></span>
+            <div>
+              <div className="eyebrow">{when}</div>
+              <div style={{ fontWeight: 500 }}>{what}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="paypal-zone">
+        <PayPalButton job={job} onAuthorized={onAuthorized} />
+        <p className="hint" style={{ textAlign: 'center' }}>Sandbox. Log in with a personal sandbox account, not the worker's.</p>
+      </div>
+    </div>
+  );
+}
+
+function JobDetailsForm({ values, setValues, onSubmit }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
   const set = (field) => (event) => setValues((current) => ({ ...current, [field]: event.target.value }));
+
+  function fillExample() {
+    setValues((current) => ({ ...current, ...EXAMPLES[current.type] }));
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -228,150 +325,127 @@ function JobDetailsForm({ onSubmit }) {
   }
 
   return (
-    <form className="card stack" onSubmit={handleSubmit}>
-      <fieldset className="field">
-        <legend>What kind of work?</legend>
-        <div className="segmented">
-          <label>
-            <input type="radio" name="type" value="code" checked={values.type === 'code'} onChange={set('type')} />
-            <span>Code (GitHub pull request)</span>
+    <form className="card form fade" onSubmit={handleSubmit}>
+      <fieldset className="seg">
+        <legend className="label">What kind of work?</legend>
+        {TYPES.map((t) => (
+          <label key={t.value} className="seg__o">
+            <input type="radio" name="type" value={t.value} checked={values.type === t.value} onChange={set('type')} />
+            <span className="ico"><Icon name={t.icon} size={17} /></span>
+            <span>
+              <b>{t.title}</b>
+              <span>{t.text}</span>
+            </span>
           </label>
-          <label>
-            <input type="radio" name="type" value="website" checked={values.type === 'website'} onChange={set('type')} />
-            <span>Website (live URL)</span>
-          </label>
-        </div>
+        ))}
       </fieldset>
 
-      <div className="field">
-        <label htmlFor="title">Title</label>
-        <input id="title" className="input" required value={values.title} onChange={set('title')} placeholder={TITLE_PLACEHOLDERS[values.type]} />
+      <div>
+        <label className="label" htmlFor="title">Title</label>
+        <input
+          id="title"
+          className="input"
+          required
+          value={values.title}
+          onChange={set('title')}
+          placeholder={TITLE_PLACEHOLDERS[values.type]}
+        />
       </div>
 
-      <div className="field">
-        <label htmlFor="description">What has to be true when the work is done?</label>
+      <div>
+        <label className="label" htmlFor="description">What has to be true when the work is done?</label>
         <textarea
           id="description"
           className="input"
           required
-          rows={5}
+          rows={4}
           value={values.description}
           onChange={set('description')}
           placeholder={PLACEHOLDERS[values.type]}
         />
-        <p className="field__hint">Be specific. The AI turns this into the checklist the work is tested against.</p>
+        <div className="hint hint-row">
+          <span>Be specific. The AI turns this into the checklist the work is tested against.</span>
+          <span className="mono">{values.description.length}</span>
+        </div>
+        <div className="examples">
+          <button type="button" onClick={fillExample}>✦ Fill with an example</button>
+        </div>
       </div>
 
       {values.type === 'code' && (
-        <div className="field">
-          <label htmlFor="repoUrl">GitHub repo</label>
+        <div className="fade">
+          <label className="label" htmlFor="repoUrl">GitHub repo</label>
           <input
             id="repoUrl"
-            className="input"
+            className="input mono"
+            style={{ fontSize: 13 }}
             type="url"
             required
             inputMode="url"
             autoCapitalize="none"
             autoCorrect="off"
+            spellCheck="false"
             pattern="https://github\.com/[^\/\s]+/[^\/\s]+/?"
             title="A repo URL like https://github.com/owner/repo"
             value={values.repoUrl}
             onChange={set('repoUrl')}
             placeholder="https://github.com/owner/repo"
           />
+          <div className="hint">Needs a GitHub Actions workflow that runs on pull requests.</div>
         </div>
       )}
 
-      <div className="field field--narrow">
-        <label htmlFor="amount">Amount (USD)</label>
-        <div className="input-prefix">
-          <span aria-hidden="true">$</span>
+      <div className="row2">
+        <div className="field--narrow">
+          <label className="label" htmlFor="amount">Amount (USD)</label>
+          <div className="prefix">
+            <span aria-hidden="true">$</span>
+            <input
+              id="amount"
+              className="input"
+              type="number"
+              required
+              inputMode="decimal"
+              min="1"
+              step="0.01"
+              value={values.amount}
+              onChange={set('amount')}
+              placeholder="200"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="label" htmlFor="workerEmail">Worker's PayPal email</label>
           <input
-            id="amount"
+            id="workerEmail"
             className="input"
-            type="number"
+            type="email"
             required
-            inputMode="decimal"
-            min="1"
-            step="0.01"
-            value={values.amount}
-            onChange={set('amount')}
-            placeholder="200"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck="false"
+            aria-describedby="workerEmail-hint"
+            value={values.workerEmail}
+            onChange={set('workerEmail')}
+            placeholder="worker@example.com"
           />
         </div>
       </div>
-
-      <div className="field">
-        <label htmlFor="workerEmail">Worker's PayPal email</label>
-        <input
-          id="workerEmail"
-          className="input"
-          type="email"
-          required
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck="false"
-          aria-describedby="workerEmail-hint"
-          value={values.workerEmail}
-          onChange={set('workerEmail')}
-          placeholder="worker@example.com"
-        />
-        <p className="field__hint" id="workerEmail-hint">
-          Filled in with our PayPal sandbox worker account. The live demo only accepts this one, so PayPal can
-          return the buyer's money if the work fails.
-        </p>
-      </div>
+      <p className="hint" id="workerEmail-hint" style={{ marginTop: -12 }}>
+        Filled in with our PayPal sandbox worker account. The live demo only accepts this one, so PayPal can return the
+        buyer's money if the work fails.
+      </p>
 
       {error && <p className="form-error" role="alert">{error}</p>}
 
-      <div className="actions">
-        <button type="submit" className="button button--primary" disabled={submitting}>
-          {submitting ? 'Saving…' : 'Generate checklist'}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function Done({ job }) {
-  const [copied, setCopied] = useState(false);
-  const submitLink = `${window.location.origin}/jobs/${job._id}/submit`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(submitLink);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard blocked: the link is still shown for copying by hand.
-    }
-  }
-
-  if (job.status !== 'FUNDED') {
-    return (
-      <div className="card stack">
-        <h2>This job is already under way</h2>
-        <Link className="button button--primary" to={`/jobs/${job._id}`}>Open the job page</Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="card card--good stack">
-      <div>
-        <h2>{formatMoney(job.amount, job.currency)} is held on PayPal</h2>
-        <p className="muted">Nothing is paid out until the work passes the checklist.</p>
-      </div>
-      <div className="field">
-        <label htmlFor="submit-link">Send the worker this link to submit their work</label>
-        <div className="copy-row">
-          <input id="submit-link" className="input" readOnly value={submitLink} onFocus={(e) => e.target.select()} />
-          <button type="button" className="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+      <div className="form__foot">
+        <span className="muted" style={{ fontSize: 13 }}>Nothing is charged at this step.</span>
+        <div className="actions">
+          <button type="submit" className="btn btn--primary" disabled={submitting}>
+            {submitting ? <><span className="spin spin--dark" />Saving…</> : <>Generate checklist <Icon name="spark" size={15} /></>}
+          </button>
         </div>
       </div>
-      <div className="actions">
-        <Link className="button button--primary" to={`/jobs/${job._id}`}>Open the job page</Link>
-      </div>
-    </div>
+    </form>
   );
 }
