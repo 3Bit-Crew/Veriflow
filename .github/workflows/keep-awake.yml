@@ -1,0 +1,16 @@
+# Keeps the free Render API awake during judging (PLAN.md 11: the server sleeps after ~15 idle minutes,
+# which also pauses the checker loop). GitHub pings /api/health every 10 minutes from outside.
+# Runs only from the main branch. Run it by hand: GitHub -> Actions -> "Keep Render awake" -> Run workflow.
+name: Keep Render awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes (Render sleeps at 15)
+  workflow_dispatch: # lets anyone on the team run it by hand to test it
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the API health check
+        run: curl -fsS --max-time 90 https://veriflow-api-wzi0.onrender.com/api/health
