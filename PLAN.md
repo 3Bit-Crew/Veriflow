@@ -404,9 +404,88 @@ The checker loop (B) runs inside the server and calls `settleJob()` directly, so
 **Timing:** today is feature-freeze day (noon, Nov 11). Build this **only if** it's done and passes the full live flow **before the freeze**. Otherwise, keep it as the first item under "future work" and mention it in the pitch.
 
 **Future work (after the hackathon)**
-- Real accounts: sign in with email or Google/GitHub (OAuth), JWT in an `httpOnly` cookie, and buyer, worker and reviewer roles on the user.
+- Real accounts with **Log in with PayPal**: see **5.11** for the full design.
 - Workers connect their **own** PayPal account (PayPal partner onboarding) instead of one shared sandbox account.
 - Rate limits on login and job creation, and audit events for who did each action.
+
+### 5.11 Log in with PayPal (future work, owned by A, client side by C)
+
+**Status:** designed, **not built**. Too big for the freeze (Nov 12, 4 pm IST), because it touches every route that changes a job. In the pitch and Devpost, say: *"Next: buyers and workers log in with PayPal, so identity and money both run through PayPal."*
+
+**Idea:** buyers and workers click **"Log in with PayPal"**. PayPal checks who they are and tells our server their PayPal id, email and name. We never store a password. It uses OAuth 2.0 / OpenID Connect (like "Sign in with Google").
+
+**Flow**
+```
+1. Browser → GET /api/auth/paypal/login
+   Server makes a random "state" (stops fake logins), redirects to PayPal's login page
+2. User logs in on PayPal's own page and agrees to share name + email
+3. PayPal → GET /api/auth/paypal/callback?code=…&state=…
+4. Server checks "state", trades the one-time code for a token
+   (POST /v1/oauth2/token, grant_type=authorization_code, with our Client ID + Secret)
+5. Server asks "who is this?" (GET /v1/identity/oauth2/userinfo)
+   → { user_id, email, name }
+6. Server finds or creates the User in MongoDB
+7. Server creates its OWN session token and sends the user back to the website.
+   PayPal is no longer involved after this.
+```
+
+**Server (A)**
+| Piece | What it does |
+|---|---|
+| `models/User.js` | `paypalUserId` (unique), `email`, `name`, `createdAt` |
+| `GET /api/auth/paypal/login` | Makes `state`, redirects to PayPal |
+| `GET /api/auth/paypal/callback` | Checks `state`, gets the token and user info, saves the user, creates our session, redirects to the website |
+| `GET /api/auth/me` | Returns the logged-in user (or 401) |
+| `POST /api/auth/logout` | Ends the session |
+| `auth.js` → `requireUser` | Middleware: no valid session → **401** |
+| `Job.buyerId` | Set to the logged-in user when a job is created |
+
+**Who may do what**
+| Action | Allowed for |
+|---|---|
+| Create a job | Any logged-in user (becomes its buyer) |
+| Generate or approve the checklist, pay | Only that job's buyer (`job.buyerId`) |
+| Submit work | Only the worker: logged-in PayPal email = `job.workerEmail` |
+| Review and payout | Admins only: email in `ADMIN_EMAILS` |
+| View jobs, events, screenshots, dashboard | Everyone (no login) |
+| Checker loop (B) | Unchanged (runs inside the server) |
+| AI agents (Agent API) | Keep the `x-api-key` from 5.10 (agents can't use a login page) |
+
+Wrong user → **403**. Extra check at authorize: the PayPal payer email should match the logged-in buyer.
+
+**Session: a token in a header, not a cookie.** The website (`veriflow-web-…onrender.com`) and the API (`veriflow-api-…onrender.com`) count as **different sites** to browsers (`onrender.com` is a public suffix). Browsers increasingly block login cookies between different sites, so a cookie could work on our laptops and fail on a judge's. Instead:
+- After the callback, the server redirects to the website with a **one-time code**. The website exchanges it for a signed token (JWT, signed with `SESSION_SECRET`, valid **8 hours**).
+- The website keeps the token and sends `Authorization: Bearer <token>` with every request.
+- Never put the token itself in the URL.
+
+**Website (C)**
+- Header: **"Log in with PayPal"** button, or the user's name and "Log out".
+- New job, Submit and Review pages ask the user to log in first.
+- `api.js` adds the `Authorization` header and sends the user to log in again on 401.
+
+**What it gives Veriflow**
+- The worker's PayPal email comes **from PayPal itself**: no typos, no paying the wrong account.
+- We can check that the person paying is the buyer.
+- No passwords to store or leak.
+
+**What it does NOT solve**
+- Logging in is **not** permission to move money. PayPal still won't let our app **void** holds for a worker's own account. That needs PayPal **partner onboarding** (Multiparty), a separate, bigger project. Until then, `PAYPAL_WORKER_EMAIL` stays.
+- On live PayPal, sharing the email needs a PayPal review. In the sandbox it works right away.
+
+**Manual setup (sandbox)**
+1. developer.paypal.com → Apps & Credentials → our app → **Sandbox** → turn on **Log in with PayPal** → Advanced settings.
+2. Return URLs: `https://veriflow-api-wzi0.onrender.com/api/auth/paypal/callback` and `http://localhost:5000/api/auth/paypal/callback`.
+3. Information requested: **full name, email**. Add privacy policy and user agreement links (simple pages on our site are enough).
+4. New server variables: `SESSION_SECRET` (long random string), `ADMIN_EMAILS` (comma-separated), `PAYPAL_LOGIN_RETURN_URL`.
+5. Demo: two browser windows (normal + incognito). Buyer = sandbox **personal** account, worker = sandbox **business** account.
+
+**Tests**
+- Not logged in → 401 on every route that changes a job. Another user's job → 403.
+- The worker can't approve the checklist. The buyer can't submit work. Only admins can review.
+- A tampered or expired token → 401. A wrong `state` in the callback → login refused.
+- Full flow on Render with both sandbox accounts: log in → create → pay → (worker) log in → submit → paid.
+
+**Effort:** A 4–6 h, C 2–3 h, testing on Render 1–2 h.
 
 ---
 
