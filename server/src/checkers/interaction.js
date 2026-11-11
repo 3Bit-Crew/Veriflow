@@ -89,10 +89,39 @@ async function screenshot(page) {
   }
 }
 
-// Wait for the page to react to an action: network quiet (max 5s), then a short pause for animations.
-async function settle(page) {
-  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(800);
+// Counts the page's open requests. Playwright's "networkidle" only works for a full page load,
+// so after a click in a single-page app (fetch to an API) we track requests ourselves.
+function trackRequests(page) {
+  const open = new Set();
+  const ignore = (req) => ['eventsource', 'websocket'].includes(req.resourceType()); // never finish
+  page.on('request', (req) => { if (!ignore(req)) open.add(req); });
+  page.on('requestfinished', (req) => open.delete(req));
+  page.on('requestfailed', (req) => open.delete(req));
+  return open;
+}
+
+// Wait for the page to react to an action: no open requests AND the page text unchanged for
+// QUIET_MS, at most maxMs. A slow API (a server waking up) shows "Loading…" for a while:
+// its request stays open, so we keep waiting instead of screenshotting the spinner.
+const QUIET_MS = 1000;
+async function settle(page, open, maxMs = 5000) {
+  const until = Date.now() + maxMs;
+  const snapshot = () => page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
+  await page.waitForTimeout(300); // let the click start its requests
+  let last = await snapshot();
+  let quietSince = open.size === 0 ? Date.now() : null;
+  while (Date.now() < until) {
+    await page.waitForTimeout(250);
+    const now = await snapshot();
+    if (open.size > 0 || now !== last) {
+      quietSince = null;
+      last = now;
+    } else if (quietSince === null) {
+      quietSince = Date.now();
+    } else if (Date.now() - quietSince >= QUIET_MS) {
+      return;
+    }
+  }
 }
 
 // ---------- the AI's plan ----------
@@ -144,7 +173,10 @@ function describe(a) {
   return `Clicked "${name}"`;
 }
 
-async function perform(page, a) {
+// After the LAST step, give a slow site up to this long to finish (the item's 2-minute limit still applies).
+const FINAL_SETTLE_MS = 30000;
+
+async function perform(page, a, open, isLast) {
   const target = page.locator(`[data-vf-id="${a.el.id}"]`).first();
   const opts = { timeout: ACTION_TIMEOUT_MS };
   if (a.do === 'fill') await target.fill(a.value, opts);
@@ -152,7 +184,7 @@ async function perform(page, a) {
     await target.selectOption({ label: a.value }, opts).catch(() => target.selectOption(a.value, opts));
   } else if (a.do === 'press') await target.press('Enter', opts);
   else await target.click(opts);
-  await settle(page);
+  await settle(page, open, isLast ? FINAL_SETTLE_MS : 5000);
 }
 
 // ---------- main entry ----------
@@ -171,6 +203,7 @@ async function runItem(browser, url, item, idx, state) {
     return host && isPrivateHost(host) ? route.abort('blockedbyclient') : route.continue();
   });
   const page = await context.newPage();
+  const open = trackRequests(page);
 
   // 1. Open the page and list what can be used
   let response;
@@ -182,7 +215,7 @@ async function runItem(browser, url, item, idx, state) {
   if (response && response.status() >= 400) {
     return { result: result(item, idx, 'FAIL', `The site returned HTTP ${response.status()}, so the steps could not be tried.`), shot: null };
   }
-  await settle(page);
+  await settle(page, open, 5000);
   const before = await screenshot(page);
   const elements = await listElements(page);
   if (elements.length === 0) {
@@ -204,9 +237,9 @@ async function runItem(browser, url, item, idx, state) {
 
   // 3. Do them
   const done = [];
-  for (const a of actions) {
+  for (const [n, a] of actions.entries()) {
     try {
-      await perform(page, a);
+      await perform(page, a, open, n === actions.length - 1);
       done.push(describe(a));
     } catch (err) {
       const why = err.message.split('\n')[0];

@@ -1,10 +1,13 @@
 // Raw Gemini calls. Only ai/index.js should import this file.
 import { GoogleGenAI } from '@google/genai';
 
-// gemini-3.5-flash was fast and available in testing (Nov 6); 3.8-flash was often overloaded.
+// gemini-3.5-flash was fast and available in testing (Nov 6).
 const DEFAULT_MODEL = 'gemini-3.5-flash';
-// Used when the main model is overloaded (503), rate-limited (429) or too slow (504).
-const DEFAULT_FALLBACK_MODEL = 'gemini-3.8-flash';
+// Tried in order when a model is overloaded (503), out of quota (429) or too slow (504).
+// The lite models have their own (bigger) free quotas and answered in 2–5s on Nov 11.
+// gemini-3.8-flash is NOT used: on the free tier it allows only 20 requests a day and often timed out.
+// GEMINI_FALLBACK_MODEL can override the list, comma-separated.
+const DEFAULT_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const TIMEOUT_MS = 30000;
 
 let client = null;
@@ -25,20 +28,30 @@ function isBusy(err) {
   );
 }
 
-// Call the main model; if it's busy, try the fallback model once.
+function modelChain() {
+  const main = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const fallbacks = process.env.GEMINI_FALLBACK_MODEL
+    ? process.env.GEMINI_FALLBACK_MODEL.split(',').map((m) => m.trim()).filter(Boolean)
+    : DEFAULT_FALLBACK_MODELS;
+  return [...new Set([main, ...fallbacks])];
+}
+
+// Call the main model; while a model is busy or out of quota, try the next one in the chain.
 async function generate(contents, baseConfig) {
   const config = { ...baseConfig, httpOptions: { timeout: TIMEOUT_MS } };
-  const main = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  const fallback = process.env.GEMINI_FALLBACK_MODEL || DEFAULT_FALLBACK_MODEL;
-  try {
-    const response = await getClient().models.generateContent({ model: main, contents, config });
-    return response.text;
-  } catch (err) {
-    if (!isBusy(err) || fallback === main) throw err;
-    console.warn(`[ai] ${main} busy, trying ${fallback}`);
-    const response = await getClient().models.generateContent({ model: fallback, contents, config });
-    return response.text;
+  const models = modelChain();
+  let lastErr;
+  for (const [i, model] of models.entries()) {
+    try {
+      const response = await getClient().models.generateContent({ model, contents, config });
+      return response.text;
+    } catch (err) {
+      lastErr = err;
+      if (!isBusy(err)) throw err;
+      if (i < models.length - 1) console.warn(`[ai] ${model} busy or out of quota, trying ${models[i + 1]}`);
+    }
   }
+  throw lastErr;
 }
 
 // Detect PNG vs JPEG from the first bytes, so callers can pass any screenshot buffer.

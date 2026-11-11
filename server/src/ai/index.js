@@ -32,6 +32,20 @@ function isBusy(err) {
   );
 }
 
+// Short, readable reason for an AI failure. These end up on the job page, so no raw JSON.
+export function friendlyAiError(err) {
+  const m = String(err?.message || err || '');
+  if (err?.status === 429 || /429|RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(m)) {
+    return 'the AI service hit its usage limit';
+  }
+  if (err?.status === 503 || /503|UNAVAILABLE|overloaded|high demand/i.test(m)) return 'the AI service is overloaded';
+  if (err?.status === 504 || /504|DEADLINE_EXCEEDED|timed? ?out|aborted/i.test(m)) return 'the AI service took too long to answer';
+  if (/not valid JSON|Empty AI reply|Bad status/i.test(m)) return 'the AI gave an answer we could not read';
+  if (/API_KEY is missing/i.test(m)) return m;
+  // Unknown: first line only, without any JSON body
+  return m.split('\n')[0].replace(/\{.*$/s, '').trim().slice(0, 120) || 'unknown AI error';
+}
+
 function textProvider(name) {
   return name === 'groq' ? groqText : geminiText;
 }
@@ -66,7 +80,8 @@ export async function generateJSON(prompt, { preferGroq = false } = {}) {
       }
     }
   }
-  throw new Error(`AI failed: ${lastError?.message || 'unknown error'}`);
+  console.error('[ai] generateJSON failed:', lastError?.message);
+  throw new Error(`AI failed: ${friendlyAiError(lastError)}`);
 }
 
 /**
@@ -82,8 +97,10 @@ export async function judgeImages(prompt, buffers = []) {
     let reply;
     try {
       reply = parseJSON(await geminiImages(prompt, images));
-    } catch {
-      reply = parseJSON(await geminiImages(prompt, images)); // one retry
+    } catch (err) {
+      // Busy / out of quota: gemini.js already tried every model, a retry would only double the wait.
+      if (isBusy(err)) throw err;
+      reply = parseJSON(await geminiImages(prompt, images)); // one retry for an unreadable answer
     }
 
     const status = String(reply.status || '').toUpperCase();
@@ -95,6 +112,11 @@ export async function judgeImages(prompt, buffers = []) {
 
     return { status, confidence, reasoning };
   } catch (err) {
-    return { status: 'UNSURE', confidence: 0, reasoning: `AI error: ${err.message}` };
+    console.error('[ai] judgeImages failed:', err?.message);
+    return {
+      status: 'UNSURE',
+      confidence: 0,
+      reasoning: `Could not check this automatically because ${friendlyAiError(err)}. A person should look at the screenshot.`,
+    };
   }
 }
