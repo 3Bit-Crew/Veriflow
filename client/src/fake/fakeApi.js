@@ -17,9 +17,10 @@ const LATENCY_MS = 150;
 
 const ALLOWED_KINDS = {
   code: ['tests_pass', 'files_changed'],
-  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score'],
+  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score', 'interaction'],
 };
 const MAX_ITEMS = 8;
+const MAX_INTERACTION_ITEMS = 2; // same limit as the server: each one drives a real browser
 
 const fail = (status, message) => {
   throw Object.assign(new Error(message), { status });
@@ -103,6 +104,27 @@ function checklistFor(job) {
   ];
 }
 
+// What "Generate checklist" returns. New website jobs also get an "interaction" item, as
+// the real AI writes when the server has INTERACTION_CHECKS=true. (The sample jobs keep
+// the shorter list above, so their amounts don't change.)
+function generatedChecklist(job) {
+  const items = checklistFor(job);
+  if (job.type !== 'website') return items;
+  const [loads, field, text, visual] = items;
+  return [
+    { ...loads, weight: 15 },
+    { ...field, weight: 20 },
+    { ...text, weight: 15 },
+    {
+      text: 'Signing up shows a thank-you message',
+      kind: 'interaction',
+      params: { steps: 'Type an email into the signup field and click Sign up', viewport: 'desktop' },
+      weight: 20,
+    },
+    { ...visual, weight: 30 },
+  ];
+}
+
 function addEvent(state, jobId, type, message, data = {}, createdAt = new Date().toISOString()) {
   state.events.push({ _id: newId(), jobId, type, message, data, createdAt, updatedAt: createdAt });
 }
@@ -155,10 +177,12 @@ function resultFor(job, index) {
   const item = job.items[index];
   const scenario = scenarioOf(job);
   const isWeak = index === weakItemIndex(job);
-  const isVisual = item.kind === 'visual';
+  // Both AI-judged kinds come back with a screenshot and less than full confidence.
+  const isVisual = item.kind === 'visual' || item.kind === 'interaction';
+  const viewport = item.params.viewport || (item.kind === 'interaction' ? 'desktop' : 'mobile');
 
   const evidence = {
-    screenshots: isVisual ? [`fake-${item.params.viewport || 'mobile'}`] : [],
+    screenshots: isVisual ? [`fake-${viewport}`] : [],
     logUrl: item.kind === 'tests_pass' ? 'https://github.com/3Bit-Crew/veriflow-demo/actions' : null,
   };
 
@@ -184,6 +208,7 @@ function resultFor(job, index) {
         tests_pass: '1 of 6 checks failed: "login accepts capital letters in the email".',
         files_changed: 'A file in src/db/ was changed, which the checklist does not allow.',
         visual: 'The signup button is cut off at the right edge on a 390px screen.',
+        interaction: 'Typed an email and clicked Sign up, but no thank-you message appeared.',
       }[item.kind] || 'The check did not pass.',
       evidence,
     };
@@ -200,6 +225,7 @@ function resultFor(job, index) {
       text_present: `Found the text "${item.params.text}".`,
       visual: 'The layout fits the screen and every control is visible.',
       speed_score: 'The speed score is above the minimum.',
+      interaction: 'Typed an email and clicked Sign up. A thank-you message appeared.',
     }[item.kind] || 'The check passed.',
     evidence,
   };
@@ -521,7 +547,7 @@ export function generateChecklist(id) {
   return call((state) => {
     const job = findJob(state, id);
     requireStatus(job, 'DRAFT');
-    job.items = checklistFor(job).map(buildItem);
+    job.items = generatedChecklist(job).map(buildItem);
     touch(job);
     addEvent(state, job._id, 'CHECKLIST_GENERATED', `AI wrote ${job.items.length} checklist items`);
     return job;
@@ -539,6 +565,10 @@ function checklistProblem(type, items) {
   if (sum !== 100) return `Weights add up to ${sum}, must be 100`;
   if (type === 'code' && items.filter((i) => i.kind === 'tests_pass').length !== 1) {
     return 'Code jobs need exactly one tests_pass item';
+  }
+  const interactions = items.filter((i) => i.kind === 'interaction').length;
+  if (interactions > MAX_INTERACTION_ITEMS) {
+    return `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactions})`;
   }
   return null;
 }
