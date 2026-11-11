@@ -630,7 +630,7 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 - [x] **K:** `validate.js` accepts `interaction` (steps ≤ 300 characters, viewport desktop/mobile, max 2 per checklist); `isPrivateHost` exported.
 - [x] **M:** checker (`checkers/interaction.js`), wired into `website.js` and `loop.js`, checklist rules and prompts, `scripts/test-interaction.js`. Tested: ShrinkThis QR → PASS, wrong expectation → FAIL, impossible steps → UNSURE.
 - [ ] **M:** push branch `b/interaction-check` and open a pull request. One retry when Gemini times out while judging.
-- [ ] **K:** add `INTERACTION_CHECKS=true` to `render.yaml` and `server/.env.example`. Set it on Render (already added in the dashboard).
+- [x] **K:** add `INTERACTION_CHECKS=true` to `render.yaml` and `server/.env.example`. Set it on Render (already added in the dashboard).
 - [ ] **H:** `checklistKinds.js`: label `interaction: 'Interaction (AI)'`, `describeParams` → `` `AI will: ${params.steps}` ``. `fakeApi.js`: add `interaction` to the website kinds, with a fake result and screenshot.
 - [ ] **All:** after merge, run one real website job on Render with an interaction item and watch the Render logs for memory errors.
 
