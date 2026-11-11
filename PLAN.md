@@ -9,6 +9,12 @@
 
 > **How to read this:** sections 1–4 explain the project. **Section 5 is the contract between the three of us.** If your code matches section 5, it will fit with everyone else's. If you need to change section 5, tell the other two first and update this file.
 
+> **Latest changes (Nov 11):**
+> - **New demo:** the code job is now a **checkout coupon feature**, not the login bug. Section 10 has everything: what the demo repo and site contain, how to prepare, and the script. **B:** the demo repo runs each test as its own GitHub Actions job, so `github.js` names the failed tests (10.1). No code change needed.
+> - **Worker email:** on Render, `POST /api/jobs` only accepts the sandbox worker account set in `PAYPAL_WORKER_EMAIL` (5.8). Use `sb-m8uku53787938@business.example.com`.
+> - **No pushes to `main` while anyone is testing, recording or judging** (8.5). Every push redeploys Render.
+> - The checker loop now re-queues stuck jobs every minute (5.6), and the client has a sample-data mode, `VITE_USE_FAKE_API` (8.3).
+
 ---
 
 ## 1. The idea in one line
@@ -37,7 +43,7 @@ This gets worse as **AI agents start hiring and paying other AI agents**, becaus
    - AI not confident → **sent to a human**, with a report of the evidence
 
 ### Demo moment
-A broken PR comes in → tests fail, money stays held → the fixed PR comes in → checklist items turn green → **"$200 released via PayPal"** appears on screen.
+A worker's coupon feature PR comes in with two money bugs → **2 of 6 tests fail**, money stays held → the fixed PR comes in → checklist items turn green → **"$200 released via PayPal"** appears on screen. Full script in section 10.
 
 ---
 
@@ -283,7 +289,7 @@ passedWeight = sum of weights of items with status PASS
 | `generateChecklist(job)` | `server/src/ai/checklist.js` | B | A (`POST /checklist` route) | Returns an array of items in the 5.2 shape (no `_id`, status `PENDING`). Weights sum to 100. Only allowed kinds. |
 | `generateJSON(prompt)` | `server/src/ai/index.js` | B | B only | Returns a parsed JSON object |
 | `judgeImages(prompt, buffers)` | `server/src/ai/index.js` | B | B only | Returns `{ status, confidence, reasoning }` |
-| `startCheckerLoop()` | `server/src/checkers/loop.js` | B | A (`index.js`, once at startup) | Every 5s, checks one `SUBMITTED` job. On startup, resets any job stuck in `CHECKING` back to `SUBMITTED`. |
+| `startCheckerLoop()` | `server/src/checkers/loop.js` | B | A (`index.js`, once at startup) | Every 5s, checks one `SUBMITTED` job. Every minute, puts any job that has sat in `CHECKING` for more than **10 minutes** back to `SUBMITTED` (its server was restarted mid-check). Newer `CHECKING` jobs are left alone, because during a Render deploy the old server may still be checking them, and checking twice would count as two tries. |
 
 **When A and B can't wait for each other:** A writes `settleJob` and `logEvent` first (day 2), and B uses a fake version (`console.log`) until then. B writes `generateChecklist` first (day 1–2), and A returns a hardcoded checklist until then.
 
@@ -310,6 +316,8 @@ A "job object" means the full `Job` document including `items`.
 
 **Submit route checks:** for code jobs, `submissionUrl` must be a PR in the job's `repoUrl` (`https://github.com/owner/repo/pull/123`). For website jobs, it must start with `http`.
 
+**Worker email check (`POST /api/jobs`):** when the server has `PAYPAL_WORKER_EMAIL` set (it is on Render), `workerEmail` must be exactly that address, or the route returns 400 with a message naming it. **Why:** PayPal only lets our app void a hold whose payee is the sandbox business account that owns the app. With any other worker, a job that fails could never give the buyer's money back. Our worker account is `sb-m8uku53787938@business.example.com`.
+
 **Auth:** every route that changes a job also needs a key. See **5.10** for which key each route needs. A missing key returns **401**, a wrong key returns **403**.
 
 ### 5.9 Payment flow (PayPal Sandbox)
@@ -317,7 +325,7 @@ A "job object" means the full `Job` document including `items`.
 1. React PayPal button  createOrder → POST /api/paypal/orders { jobId } → returns { orderId }
 2. Express creates order: intent = "AUTHORIZE",
                           purchase_units[0].amount = job.amount,
-                          purchase_units[0].payee.email_address = job.workerEmail
+                          purchase_units[0].payee.email_address = job.workerEmail  (must be the app's own sandbox business account, see 5.8)
                           saves job.paypalOrderId
 3. Buyer logs in with a SANDBOX personal account and approves
 4. Button onApprove     → POST /api/paypal/orders/:orderId/authorize { jobId }
@@ -432,9 +440,9 @@ Fill in names:
   4. `/jobs/:id`: **live status** (poll `GET /api/jobs/:id` every 2s): each item turning green/red/grey, reasoning, screenshots, attempts, final payout. When status is `NEEDS_REVIEW`, show a **review box** (payout amount input + "Settle" button → `POST /review`).
   5. `/dashboard`: **AG Grid** with 3 grids: jobs (`GET /api/jobs`), checklist results (items from all jobs, one row per item), audit log (`GET /api/events`)
 - Use fake data matching section 5 until A's API is ready
-- **Demo material** (start by day 3):
-  - A demo GitHub repo with a failing test, a GitHub Actions workflow that runs the tests, and 2 PRs: one that **doesn't** fix the bug and one that does. **Use the same branch:** push the broken version first, then push the fix to the same PR. Or use two PRs, both are fine because the worker submits a URL each time.
-  - A demo website with a good and a broken version, hosted on Render Static Site or GitHub Pages
+- **Demo material** (start by day 3), exactly as described in **10.1**:
+  - The demo GitHub repo: a small shop checkout where the worker adds coupon codes, 6 buyer tests (each its own GitHub Actions job), and 3 PRs: `attempt-1`, `fix` and `cheat`
+  - The demo website: a good and a broken version of one landing page, hosted on Render Static Site or GitHub Pages
 - Demo video, Devpost write-up, screenshots, and the architecture image
 
 ---
@@ -496,11 +504,13 @@ GITHUB_TOKEN=...
 PAGESPEED_API_KEY=...                   # optional
 ADMIN_KEY=...                           # reviewer key for payouts (5.10), long random string
 AGENT_API_KEY=...                       # Agent API key (5.10, stretch)
+PAYPAL_WORKER_EMAIL=sb-m8uku53787938@business.example.com   # the only worker email allowed (5.8). Leave empty locally to allow any
 ```
 `client/.env`
 ```
 VITE_API_URL=http://localhost:5000
 VITE_PAYPAL_CLIENT_ID=...               # same Client ID, NOT the secret
+VITE_USE_FAKE_API=false                 # true = the client runs on sample data in the browser, no server needed (for UI work only)
 ```
 Share secrets privately (e.g. a direct message), **never** in GitHub or a public chat. Add `.env` to `.gitignore` on day 1. Commit a `.env.example` with the names but no values.
 
@@ -536,6 +546,7 @@ veriflow/
 - `main` must always work. Everyone works on their own branch (`a/paypal`, `b/checkers`, `c/dashboard`).
 - Small pull requests, merged at least once a day. Pull `main` every morning.
 - Changes to section 5 (models, routes, statuses) go in their own small PR, merged quickly, and announced in the team chat.
+- **Never push or merge to `main` while someone is testing, recording or judging.** Render redeploys `main` automatically, and a redeploy restarts the server. A check that gets cut off in the middle only restarts after 10 minutes (5.6), which ruins a take. Say in the team chat before you start recording, and again when you're done.
 
 ---
 
@@ -546,15 +557,69 @@ veriflow/
 
 ---
 
-## 10. Demo script (≈ 3 minutes; check the time limit in the Devpost rules)
+## 10. Demo (≈ 3 minutes; check the time limit in the Devpost rules)
 
-1. **Problem (20s):** "Online work has a trust problem. And soon AI agents will be hiring other AI agents with no human watching."
-2. **Create job (30s):** type "Fix the login bug, all tests must pass, don't change the database code." AI makes the checklist (`tests_pass`, `files_changed` with `mustNotTouch: src/db/`). Pay $200 with PayPal → *"$200 held."*
-3. **First try, broken (35s):** worker submits a PR that still fails a test → items go red → **"Changes requested, $200 still held."**
-4. **Second try, fixed (35s):** worker submits the fixed PR → tests pass → items go green → **"$200 released to worker via PayPal."**
-5. **Website job (30s, quick):** a site where the signup button is cut off on mobile. The AI flags it, and the dashboard shows the job going to human review or a partial payout. Use a job that has already run, so you don't wait on screen.
-6. **Dashboard (20s):** AG Grid with every job, check result, and PayPal action, all auditable.
-7. **Close (10s):** "Veriflow: money moves only when the work is proven."
+**The story:** a shop owner hires a freelancer to add coupon codes to their checkout. The freelancer's first attempt gets the money math wrong, so Veriflow holds the payment. The fixed version passes, and PayPal pays automatically. It's money math in a PayPal hackathon, and it's a real feature rather than a one-line fix, so it shows Veriflow works for real freelance work.
+
+### 10.1 What we build for the demo (C)
+
+**Demo repo: `3Bit-Crew/veriflow-demo`** (public)
+```
+src/checkout.js               # the cart total; the worker adds coupon support here
+src/payment/                  # "payment code": the job says not to touch it
+tests/checkout.test.js        # the buyer's 6 tests (protected automatically, see 5.3)
+.github/workflows/tests.yml   # runs each test as its own job (see below)
+```
+
+The buyer's 6 tests:
+| # | Test name (what shows on screen) | Checks that |
+|---|---|---|
+| 1 | Total without a coupon | Items plus shipping add up correctly |
+| 2 | SAVE10 takes 10% off | `SAVE10` takes 10% off the items |
+| 3 | FREESHIP makes shipping free | `FREESHIP` sets shipping to $0 |
+| 4 | Unknown coupon is rejected | A made-up code gives an error, not a silent $0 discount |
+| 5 | Shipping not discounted | `SAVE10` takes 10% off the items only, never the shipping |
+| 6 | Rounds to cents | $19.99 × 3 with `SAVE10` = $53.97, not $53.973 |
+
+**Each test is its own GitHub Actions job** (a `matrix` in `tests.yml`, with the job named after the test). Why: B's `github.js` reports results per GitHub check, and each job is one check. With one job for all tests, the screen would only say "1 of 1 check(s) failed: test". With one job per test, it says **"2 of 6 check(s) failed: Rounds to cents (failure), Shipping not discounted (failure)"**, which a judge understands at a glance. The jobs run in parallel and must finish in under 30 seconds.
+
+**The 3 pull requests** (all from the worker, opened **before** recording so GitHub has already finished the tests):
+| PR branch | What the worker did | Tests | What Veriflow does |
+|---|---|---|---|
+| `attempt-1` | Adds coupons, but forgets to round to cents and discounts the shipping too | 4 of 6 pass | **Changes requested**, money still held |
+| `fix` | Everything right | 6 of 6 pass | **Paid in full** |
+| `cheat` | Edits the tests so they "pass" | all "pass" | The automatic test-protection item fails (5.3), so it's **caught**: changes requested on a first try |
+
+- `attempt-1` and `fix` change **only `src/checkout.js`**. They never touch `tests/`, `.github/` or `src/payment/`, so only the tests decide the result.
+- `cheat` needs **its own job**, because a job allows only two tries (first try plus one resubmit) and the main job uses both. Run it before recording. Note that the test-protection item is worth only about 10%: on a *second* try, a cheat would still get a partial payout of about 90%. So say "caught" on screen, not "blocked".
+
+**Demo website** (two public URLs, on Render Static Site or GitHub Pages)
+- A bakery landing page: headline "Fresh every morning", an email field and a "Sign up" button.
+- **Good version:** everything fits on a phone.
+- **Broken version:** the "Sign up" button is cut off at the right edge on a 390px phone screen, so the AI vision check flags it.
+
+### 10.2 Before recording
+- [ ] Tell the team you're recording. **Nobody pushes to `main`** until you say you're done (8.5).
+- [ ] All 3 PRs are open and their GitHub Actions runs have finished.
+- [ ] **Pre-run two jobs**, so nobody waits on screen:
+  - the **website job** on the broken site URL (ends in human review or a partial payout)
+  - the **cheat job** on the `cheat` PR (ends in "Changes requested" with the test-protection item red)
+- [ ] Wake up Render: open the live site and `<server>/api/health` a few minutes before (the free plan sleeps after ~15 minutes).
+- [ ] Have ready: the sandbox **buyer** login for the PayPal popup (8.1), and the worker email `sb-m8uku53787938@business.example.com` (5.8).
+
+### 10.3 Script
+| # | Part | Time | What happens on screen |
+|---|---|---|---|
+| 1 | **Problem** | 20s | "Online work has a trust problem. And soon AI agents will be hiring other AI agents with no human watching." |
+| 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200**, the worker email above, and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
+| 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Rounds to cents, Shipping not discounted"** → **"Changes requested. $200.00 is still held."** |
+| 4 | **Second try** | 35s | The worker submits the `fix` PR. Items turn green one by one → **"$200.00 released to the worker via PayPal."** |
+| 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot, so it went to human review or a partial payout. |
+| 6 | **Dashboard** | 20s | AG Grid: every job, every check result and every PayPal action, all auditable. |
+| 7 | **Close** | 10s | "Veriflow: money moves only when the work is proven." |
+
+**Job description to type in step 2** (it names the files on purpose, so the AI's "files changed" rules match the repo exactly; the checklist editor can't change those rules):
+> Add coupon codes to `src/checkout.js`: SAVE10 = 10% off the items, FREESHIP = free shipping. Totals must be correct to the cent. Don't change anything in `src/payment/`.
 
 ---
 
@@ -568,8 +633,8 @@ veriflow/
 | Playwright doesn't run on Render | Use a Dockerfile based on the official Playwright image (`mcr.microsoft.com/playwright`). If still stuck by day 4, run the server on a laptop for the demo. |
 | Render free plan runs out of memory with Playwright | One job at a time, close the browser after each job, small viewports, JPEG screenshots. |
 | Render free server "sleeps" after ~15 min idle (first request takes ~1 min), and the checker loop pauses while asleep | Open the site a few minutes before recording or judging. |
-| Server restarts in the middle of a check | On startup the loop resets `CHECKING` jobs to `SUBMITTED` (5.6). |
-| GitHub Actions slow during the demo | Keep the test suite tiny (finishes in under 30s). Pre-record that part of the video. |
+| Server restarts in the middle of a check | The loop puts a job stuck in `CHECKING` for 10+ minutes back in the queue (5.6). To avoid it during recording, nobody pushes to `main` (8.5). |
+| GitHub Actions slow during the demo | Keep the test suite tiny (finishes in under 30s). Open the demo PRs before recording so the results already exist (10.2). Pre-record that part of the video if needed. |
 | Running out of time | Cut in this order: speed check → Agent API → website job → keep the code job only. **Don't cut resubmit**, the demo needs it. |
 | Deployed site breaks on demo day | Record the video from a working run on day 5–6. Don't change code after the freeze. |
 
