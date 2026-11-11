@@ -8,6 +8,7 @@
 // It never throws: any problem becomes an UNSURE result.
 
 import { pathMatches } from '../ai/checklistRules.js';
+import { RESTRICTED_FILES_NOTE } from '../decision.js';
 
 export { pathMatches }; // shared with the checklist rules, so both use the same path logic
 
@@ -127,7 +128,7 @@ function judgeFiles(changedFiles, params) {
   }
   const problems = [];
   if (missing.length) problems.push(`did not change ${missing.join(', ')}`);
-  if (forbidden.length) problems.push(`changed files it must not touch: ${forbidden.join(', ')}`);
+  if (forbidden.length) problems.push(`${RESTRICTED_FILES_NOTE}: ${forbidden.join(', ')}`);
   return { status: 'FAIL', reasoning: `The pull request ${problems.join('; ')}.` };
 }
 

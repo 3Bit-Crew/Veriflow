@@ -39,8 +39,8 @@ This gets worse as **AI agents start hiring and paying other AI agents**, becaus
 6. **PayPal pays out automatically:**
    - all checks pass → **full payment** to the worker
    - some checks fail on the **first try** → money stays held, worker gets **one chance to fix and resubmit**
-   - some checks still fail on the **second try** → **partial payment**, the rest goes back to the buyer
-   - nothing passes on the second try → **hold cancelled**, buyer pays nothing
+   - any check still fails on the **second try** → **hold cancelled**: the worker gets nothing, the buyer pays nothing (all or nothing, no partial payouts)
+   - the worker changes a file they must not touch (cheating) → **hold cancelled at once**, on any try, no resubmit
    - AI not confident → **sent to a human**, with a report of the evidence
 
 ### Demo moment
@@ -72,7 +72,7 @@ Use Postman **only** on day 1 to try PayPal's API collection.
 - [ ] Worker submits a **GitHub PR** or a **website URL**
 - [ ] **Code checker:** reads the PR's test results from GitHub Actions and which files were changed
 - [ ] **Website checker:** Playwright opens the site, takes screenshots, and checks elements. AI reviews the screenshots.
-- [ ] **Decision engine:** full capture / one resubmit / partial capture / void / needs review (section 5.5)
+- [ ] **Decision engine:** full capture / one resubmit / void / needs review (section 5.5)
 - [ ] **Resubmit once** after a failed first try (the demo depends on it)
 - [ ] **Human review:** approve or set a payout when a job is `NEEDS_REVIEW`
 - [ ] **AG Grid dashboard:** jobs, checklist results, audit log
@@ -154,7 +154,7 @@ All AI calls go through **one file**, `server/src/ai/index.js` (see 5.8). Nobody
 
 ### 5.1 Job statuses
 ```
-DRAFT → CHECKLIST_READY → FUNDED → SUBMITTED → CHECKING ─┬→ SETTLED            (full / partial / void)
+DRAFT → CHECKLIST_READY → FUNDED → SUBMITTED → CHECKING ─┬→ SETTLED            (full / void)
                                        ▲                 ├→ CHANGES_REQUESTED  (1st try failed, money still held)
                                        │                 │        │
                                        └─────────────────┼────────┘  worker resubmits
@@ -205,9 +205,9 @@ const JobSchema = new Schema({
   paypalOrderId: String,
   paypalAuthId:  String,
   submissionUrl: String,                            // PR URL (code) or website URL (website)
-  attempts:      { type: Number, default: 0 },      // how many times the work was checked
+  attempts:      { type: Number, default: 0 },      // how many times the worker submitted (set by POST /submit)
   payoutAmount:  Number,                            // set when SETTLED
-  settlement:    { type: String, enum: ['FULL', 'PARTIAL', 'VOID'] }, // set when SETTLED
+  settlement:    { type: String, enum: ['FULL', 'PARTIAL', 'VOID'] }, // set when SETTLED. The rule (5.5) gives only FULL or VOID; PARTIAL only comes from a human review payout
   items:         [ChecklistItemSchema]
 }, { timestamps: true });
 
@@ -279,17 +279,18 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 B's loop runs this after all items are checked, then acts on the result.
 
 ```
-passedWeight = sum of weights of items with status PASS
+All or nothing: the worker is paid only when every item passes. There are no partial payouts.
 
-1. any item UNSURE, or any item has confidence < 0.7     → NEEDS_REVIEW
-2. passedWeight == 100                                   → settleJob(job, amount)              → FULL
-3. job.attempts == 1  (this was the first try)           → CHANGES_REQUESTED  (money stays held)
-4. passedWeight == 0                                     → settleJob(job, 0)                   → VOID
-5. otherwise                                             → settleJob(job, amount × passedWeight / 100) → PARTIAL
 ```
-- Amounts are **rounded down to 2 decimals** (e.g. 133.333 → 133.33) and sent to PayPal as a string `"133.33"`.
-- `job.attempts` goes up by 1 each time the loop starts checking a job (`SUBMITTED` → `CHECKING`).
-- Example: $200 job, items worth 40 + 30 + 30. On the 1st try the last item fails → `CHANGES_REQUESTED`. On the 2nd try it still fails → capture **$140**, and the remaining $60 hold is released.
+1. a files_changed item FAILED because a restricted file was changed (cheating) → settleJob(job, 0) → VOID, on any try, no resubmit
+2. any item UNSURE, or any item has confidence < 0.7     → NEEDS_REVIEW
+3. every item PASS                                       → settleJob(job, amount)  → FULL
+4. job.attempts == 1  (this was the first try)           → CHANGES_REQUESTED  (money stays held)
+5. otherwise (something still fails on the 2nd try)      → settleJob(job, 0)       → VOID
+```
+- `job.attempts` goes up by 1 each time the worker submits (`POST /api/jobs/:id/submit`), not when checking starts, so a server restart can't use up a try.
+- Example: $200 job. On the 1st try one item fails → `CHANGES_REQUESTED`. On the 2nd try it still fails → $0, the hold is voided and the buyer keeps everything.
+- Example: the PR changes `test/` when the checklist says it must not → voided at once, even on the 1st try.
 
 ### 5.6 Shared functions (how A's and B's code connect)
 | Function | File | Owner | Called by | What it does |
@@ -517,7 +518,7 @@ Fill in names:
 - `checkers/visual.js`: send the right screenshot + item text to `judgeImages` → result
 - `checkers/speed.js` (should-have): PageSpeed Insights → `speed_score`
 - `decision.js`: rule 5.5
-- `checkers/loop.js`: `startCheckerLoop()`. Every 5s, take **one** `SUBMITTED` job → `attempts + 1`, status `CHECKING` → run each item's checker → save results on the items → `logEvent` → apply 5.5 → set `CHANGES_REQUESTED` / `NEEDS_REVIEW` or call `settleJob`. **One job at a time** (Playwright uses a lot of memory on the free plan). Close the browser after each job.
+- `checkers/loop.js`: `startCheckerLoop()`. Every 5s, take **one** `SUBMITTED` job → status `CHECKING` (the loop does not touch `attempts`, the submit route counts it) → run each item's checker → save results on the items → `logEvent` → apply 5.5 → set `CHANGES_REQUESTED` / `NEEDS_REVIEW` or call `settleJob`. **One job at a time** (Playwright uses a lot of memory on the free plan). Close the browser after each job.
 - Test every checker on its own with a small script before connecting it
 
 ### Person C: Frontend & Demo
@@ -679,10 +680,11 @@ The buyer's 6 tests:
 |---|---|---|---|
 | `attempt-1` | Adds coupons, but forgets to round to cents and discounts the shipping too | 4 of 6 pass | **Changes requested**, money still held |
 | `fix` | Everything right | 6 of 6 pass | **Paid in full** |
-| `cheat` | Edits the tests so they "pass" | all "pass" | The automatic test-protection item fails (5.3), so it's **caught**: changes requested on a first try |
+| `cheat` | Edits the tests so they "pass" | all "pass" | The automatic test-protection item fails (5.3), so it's **caught and blocked**: the hold is voided at once, $0 to the worker, no resubmit |
 
 - `attempt-1` and `fix` change **only `src/checkout.js`**. They never touch `tests/`, `.github/` or `src/payment/`, so only the tests decide the result.
-- `cheat` needs **its own job**, because a job allows only two tries (first try plus one resubmit) and the main job uses both. Run it before recording. Note that the test-protection item is worth only about 10%: on a *second* try, a cheat would still get a partial payout of about 90%. So say "caught" on screen, not "blocked".
+- `cheat` needs **its own job**, because it ends that job: changing a restricted file voids the hold at once, on any try (5.5). Run it before recording. On screen it is "caught and blocked: $0".
+- Voiding only works when the worker is the app's **own** sandbox business account (PayPal rule, 8.1). With any other worker the void fails and the job goes to human review. Use that account as the worker on the cheat and website jobs.
 
 **Demo website: `3Bit-Crew/veriflow-demo-site`** (public, on GitHub Pages, live since Nov 11)
 - A bakery landing page: headline "Fresh every morning", an email field and a "Sign up" button. Signing up shows "Thank you, you're on the list!" in place of the form (for the interaction check).
@@ -695,8 +697,8 @@ The buyer's 6 tests:
 - [ ] Tell the team you're recording. **Nobody pushes to `main`** until you say you're done (8.5).
 - [ ] All 3 PRs are open and their GitHub Actions runs have finished.
 - [ ] **Pre-run two jobs**, so nobody waits on screen:
-  - the **website job**, in two tries: submit the broken site URL. The visual check fails, so the first try ends in "Changes requested" (5.5: a confident failure on a first try always does). Then submit the **same broken URL again**: the second try ends in a **partial payout**, with the visual item's share returned to the buyer. (If the AI is unsure instead, it ends in human review. That works for the script too.)
-  - the **cheat job** on the `cheat` PR (ends in "Changes requested" with the test-protection item red)
+  - the **website job**, in two tries: submit the broken site URL. The visual check fails, so the first try ends in "Changes requested" (5.5: a confident failure on a first try always does). Then submit the **same broken URL again**: the second try ends in a **void**: the worker gets $0 and the buyer keeps the whole hold. (If the AI is unsure instead, it ends in human review. That works for the script too.)
+  - the **cheat job** on the `cheat` PR (ends **voided**, $0 to the worker, with the test-protection item red)
 - [ ] Wake up Render: open the live site and `<server>/api/health` a few minutes before (the free plan sleeps after ~15 minutes).
 - [ ] Have ready: the sandbox **buyer** login for the PayPal popup (8.1). The worker email `sb-m8uku53787938@business.example.com` (5.8) is already filled in on the New job form.
 
@@ -707,7 +709,7 @@ The buyer's 6 tests:
 | 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200** (the worker email is already filled in), and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
 | 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Rounds to cents, Shipping not discounted"** → **"Changes requested. $200.00 is still held."** |
 | 4 | **Second try** | 35s | The worker submits the `fix` PR. Items turn green one by one → **"$200.00 released to the worker via PayPal."** |
-| 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot. The worker resubmitted without fixing it, so PayPal paid only for the items that passed and returned the rest to the buyer. |
+| 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot. The worker resubmitted without fixing it, so the worker gets **nothing** and the whole hold goes back to the buyer: every item must pass. The cheat job was voided the same way, on its first try. |
 | 6 | **Dashboard** | 20s | AG Grid: every job, every check result and every PayPal action, all auditable. |
 | 7 | **Close** | 10s | "Veriflow: money moves only when the work is proven." |
 
