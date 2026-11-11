@@ -97,9 +97,14 @@ const KIND_RULES = {
     // Plain-English steps the checker performs on the page, e.g. "Click Sign up, type an email, press Submit"
     interaction:    (p) => (isNonEmptyString(p.steps) && p.steps.length <= MAX_INTERACTION_STEPS_CHARS &&
                             ['desktop', 'mobile'].includes(p.viewport)) ||
-                          `needs params.steps (up to ${MAX_INTERACTION_STEPS_CHARS} characters) and params.viewport "desktop" or "mobile"`
+                          `needs params.steps (up to ${MAX_INTERACTION_STEPS_CHARS} characters) and params.viewport "desktop" or "mobile"`,
+    // A Google Lighthouse score from the same PageSpeed call as speed_score (PLAN.md 13.2)
+    lighthouse_score: (p) => (LIGHTHOUSE_CATEGORIES.includes(p.category) &&
+                              Number.isFinite(p.min) && p.min >= 0 && p.min <= 100) ||
+                             `needs params.category (${LIGHTHOUSE_CATEGORIES.join(', ')}) and params.min between 0 and 100`
   }
 };
+const LIGHTHOUSE_CATEGORIES = ['accessibility', 'best-practices', 'seo'];
 const MAX_INTERACTION_STEPS_CHARS = 300;
 const MAX_INTERACTION_ITEMS = 2; // each one drives a browser session, so keep checks fast and cheap
 
@@ -136,6 +141,13 @@ export function validateChecklist(job, items) {
   const interactions = clean.filter((it) => it.kind === 'interaction').length;
   if (interactions > MAX_INTERACTION_ITEMS) {
     throw httpError(400, `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactions})`);
+  }
+
+  // One Lighthouse item per category: two "SEO ≥ 80" and "SEO ≥ 90" items would double-count one score
+  const seen = new Set();
+  for (const it of clean.filter((x) => x.kind === 'lighthouse_score')) {
+    if (seen.has(it.params.category)) throw httpError(400, `Only one lighthouse_score item per category (${it.params.category} appears twice)`);
+    seen.add(it.params.category);
   }
   return clean;
 }
