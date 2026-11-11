@@ -10,7 +10,22 @@ export const ALLOWED_KINDS = {
     "visual",
     "speed_score",
     "interaction",
+    "lighthouse_score",
   ],
+};
+
+// "lighthouse_score" items: Google Lighthouse score for one category (PLAN.md 13.2).
+// Performance stays "speed_score". Same list as A's validate.js.
+export const LIGHTHOUSE_CATEGORIES = ["accessibility", "best-practices", "seo"];
+// What the AI might write → the category name Lighthouse uses
+const CATEGORY_ALIASES = {
+  accessibility: "accessibility",
+  a11y: "accessibility",
+  "best-practices": "best-practices",
+  "best practices": "best-practices",
+  best_practices: "best-practices",
+  bestpractices: "best-practices",
+  seo: "seo",
 };
 
 export const MAX_ITEMS = 8;
@@ -131,6 +146,15 @@ function cleanParams(kind, params = {}) {
         min: Number.isFinite(min) ? Math.min(100, Math.max(1, min)) : 80,
       };
     }
+    case "lighthouse_score": {
+      const category = CATEGORY_ALIASES[String(p.category || "").trim().toLowerCase()];
+      if (!category) return null;
+      const min = Math.round(Number(p.min));
+      return {
+        category,
+        min: Number.isFinite(min) ? Math.min(100, Math.max(0, min)) : 90,
+      };
+    }
     case "interaction":
       // steps = what a user does first, in plain English ("Paste a long link and click Shrink It").
       return isNonEmptyString(p.steps)
@@ -216,6 +240,15 @@ export function validateAndFixItems(type, items) {
     (i) => i.kind !== "interaction" || ++interactions <= MAX_INTERACTION_ITEMS,
   );
 
+  // One lighthouse_score item per category (A's route rejects duplicates): keep the first.
+  const categoriesSeen = new Set();
+  cleaned = cleaned.filter((i) => {
+    if (i.kind !== "lighthouse_score") return true;
+    if (categoriesSeen.has(i.params.category)) return false;
+    categoriesSeen.add(i.params.category);
+    return true;
+  });
+
   // Code jobs: exactly one tests_pass item.
   if (type === "code") {
     const firstTests = cleaned.find((i) => i.kind === "tests_pass");
@@ -278,6 +311,12 @@ export function findChecklistProblems(type, items) {
     problems.push(
       `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactionCount})`,
     );
+  const lighthouseCategories = items
+    .filter((i) => i?.kind === "lighthouse_score")
+    .map((i) => i.params?.category);
+  const repeated = lighthouseCategories.find((c, k) => lighthouseCategories.indexOf(c) !== k);
+  if (repeated)
+    problems.push(`Only one lighthouse_score item per category (${repeated} appears twice)`);
   if (type === "code") {
     const count = items.filter((i) => i?.kind === "tests_pass").length;
     if (count !== 1)
