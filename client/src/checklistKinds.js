@@ -12,6 +12,7 @@ export const KIND_LABELS = {
   visual: 'Visual check (AI)',
   speed_score: 'Speed score',
   interaction: 'Interaction (AI)',
+  lighthouse_score: 'Lighthouse score',
 };
 
 // One plain sentence saying what the checker will actually test.
@@ -38,6 +39,9 @@ export function describeParams({ kind, params = {} }) {
     case 'interaction':
       // The AI uses the site (types, clicks) on this screen size, then judges what happened.
       return `AI will, on ${params.viewport === 'mobile' ? 'mobile' : 'desktop'}: ${params.steps}`;
+    case 'lighthouse_score':
+      // Google Lighthouse accessibility, best-practices or SEO score, from the same PageSpeed call (PLAN.md 13.2).
+      return `Lighthouse ${params.category} score of at least ${params.min}`;
     default:
       return '';
   }

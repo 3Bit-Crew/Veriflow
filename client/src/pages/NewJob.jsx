@@ -7,6 +7,10 @@ import { formatMoney } from '../format.js';
 
 const STEPS = ['Describe the job', 'Approve the checklist', 'Hold the payment'];
 
+// The PayPal sandbox business account that owns our PayPal app. On Render the server accepts
+// only this worker email (PAYPAL_WORKER_EMAIL, PLAN.md 5.8), so the form starts with it.
+const SANDBOX_WORKER_EMAIL = 'sb-m8uku53787938@business.example.com';
+
 const PLACEHOLDERS = {
   code: 'Fix the login bug so emails with capital letters work. All tests must pass. Don\'t change the database code.',
   website: 'Landing page with the headline "Fresh every morning" and a signup form with an email field and a "Sign up" button. Must look good on mobile.',
@@ -189,7 +193,7 @@ function JobDetailsForm({ onSubmit }) {
     description: '',
     type: 'code',
     amount: '',
-    workerEmail: '',
+    workerEmail: SANDBOX_WORKER_EMAIL,
     repoUrl: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -273,40 +277,44 @@ function JobDetailsForm({ onSubmit }) {
         </div>
       )}
 
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="amount">Amount (USD)</label>
-          <div className="input-prefix">
-            <span aria-hidden="true">$</span>
-            <input
-              id="amount"
-              className="input"
-              type="number"
-              required
-              inputMode="decimal"
-              min="1"
-              step="0.01"
-              value={values.amount}
-              onChange={set('amount')}
-              placeholder="200"
-            />
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="workerEmail">Worker's PayPal email</label>
+      <div className="field field--narrow">
+        <label htmlFor="amount">Amount (USD)</label>
+        <div className="input-prefix">
+          <span aria-hidden="true">$</span>
           <input
-            id="workerEmail"
+            id="amount"
             className="input"
-            type="email"
+            type="number"
             required
-            autoCapitalize="none"
-            autoCorrect="off"
-            value={values.workerEmail}
-            onChange={set('workerEmail')}
-            placeholder="worker@example.com"
+            inputMode="decimal"
+            min="1"
+            step="0.01"
+            value={values.amount}
+            onChange={set('amount')}
+            placeholder="200"
           />
         </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="workerEmail">Worker's PayPal email</label>
+        <input
+          id="workerEmail"
+          className="input"
+          type="email"
+          required
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck="false"
+          aria-describedby="workerEmail-hint"
+          value={values.workerEmail}
+          onChange={set('workerEmail')}
+          placeholder="worker@example.com"
+        />
+        <p className="field__hint" id="workerEmail-hint">
+          Filled in with our PayPal sandbox worker account. The live demo only accepts this one, so PayPal can
+          return the buyer's money if the work fails.
+        </p>
       </div>
 
       {error && <p className="form-error" role="alert">{error}</p>}
