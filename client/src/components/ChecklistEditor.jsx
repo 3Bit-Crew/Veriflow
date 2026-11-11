@@ -3,41 +3,9 @@ import { approveChecklist } from '../api.js';
 import { checklistProblems, describeParams, KIND_LABELS } from '../checklistKinds.js';
 import { Icon } from './ui.jsx';
 
-// An item's dollar value, typed directly. Weights are whole percents (PLAN.md 5.3), so a typed
-// amount becomes the nearest whole percent of the job: on a $200 job, $121 becomes 61% ($122).
-// What the buyer types stays in the box while they type; it snaps when they leave it.
-function MoneyBox({ amount, weight, label, onWeight }) {
-  const [typing, setTyping] = useState(null);
-  const snapped = Number.isFinite(weight) ? ((amount * weight) / 100).toFixed(2) : '';
-
-  function handleChange(event) {
-    const value = event.target.value;
-    setTyping(value);
-    if (value.trim() === '') {
-      onWeight('');
-      return;
-    }
-    const dollars = Number(value);
-    if (Number.isFinite(dollars) && dollars >= 0 && amount > 0) onWeight(String(Math.round((dollars / amount) * 100)));
-  }
-
-  return (
-    <label className="ci__v money-box" title="Dollar value of this item. Rounds to a whole percent of the job.">
-      <span className="visually-hidden">{label}</span>
-      <span aria-hidden="true">$</span>
-      <input
-        type="number"
-        inputMode="decimal"
-        min="0"
-        step="0.01"
-        value={typing ?? snapped}
-        onChange={handleChange}
-        onFocus={(e) => e.target.select()}
-        onBlur={() => setTyping(null)}
-      />
-    </label>
-  );
-}
+// Payouts are all or nothing (PLAN.md 5.5): the worker is paid only when every item passes.
+// A weight is how much an item counts toward the score, not a share of the money.
+export const WEIGHT_HELP = 'Weight is how much an item counts toward the score. The worker is paid only if every item passes.';
 
 // One color per checklist item, used by the composition bar, the item numbers and the receipt.
 export const ITEM_COLORS = ['#0E5A43', '#1E8A5E', '#5FAE7E', '#A9DB4A', '#C6F36B', '#7C8A84', '#3A4340', '#B7C9A8'];
@@ -155,7 +123,7 @@ export default function ChecklistEditor({ job, onApproved, onChange }) {
       <div className="form__head">
         <div>
           <h2>Review the checklist</h2>
-          <p className="muted">Each item is checked automatically. Its weight is its share of the payment if the work only partly passes.</p>
+          <p className="muted">Each item is checked automatically. {WEIGHT_HELP}</p>
         </div>
         <button type="button" className="btn btn--sm" onClick={evenOut} disabled={items.length < 2}>
           Even out
@@ -212,12 +180,6 @@ export default function ChecklistEditor({ job, onApproved, onChange }) {
                   <span aria-hidden="true">%</span>
                 </label>
               </div>
-              <MoneyBox
-                amount={job.amount}
-                weight={payload[index].weight}
-                label={`Item ${index + 1} value in dollars`}
-                onWeight={(value) => update(index, 'weight', value)}
-              />
               {canRemove(item) ? (
                 <button
                   type="button"

@@ -305,6 +305,7 @@ function Vault({ job, events, reviewed, countUp, onSettled }) {
   const amount = formatMoney(job.amount, job.currency);
   const passed = job.items.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
   const settled = job.status === 'SETTLED';
+  const voided = settled && job.settlement === 'VOID';
   const notHeld = job.status === 'DRAFT' || job.status === 'CHECKLIST_READY';
   const paid = job.payoutAmount ?? 0;
   const back = Math.max(0, Math.round((job.amount - paid) * 100) / 100);
@@ -314,7 +315,9 @@ function Vault({ job, events, reviewed, countUp, onSettled }) {
     <div className="vault jv">
       <div className="jv__top">
         <div style={{ minWidth: 0 }}>
-          <div className="muted jv__label">{settled ? 'Released to the worker' : notHeld ? 'To be held' : 'Held in escrow'}</div>
+          <div className="muted jv__label">
+            {settled ? (voided ? 'Paid to the worker' : 'Released to the worker') : notHeld ? 'To be held' : 'Held in escrow'}
+          </div>
           <div className="vault__amt jv__amt settled__amount">
             {settled ? <CountUp value={paid} currency={job.currency} animate={countUp} /> : amount}
             <small>USD</small>
@@ -326,7 +329,7 @@ function Vault({ job, events, reviewed, countUp, onSettled }) {
           )}
         </div>
         {settled ? (
-          <span className="lock lock--settled">Settled</span>
+          <span className="lock lock--settled">{voided ? 'Voided' : 'Settled'}</span>
         ) : notHeld ? (
           <span className="eyebrow">Not held</span>
         ) : (
@@ -338,7 +341,7 @@ function Vault({ job, events, reviewed, countUp, onSettled }) {
         <>
           <div className="jv__bar"><HoldBar items={items} dark height={16} gap={4} /></div>
           <div className="jv__legend">
-            <span><i style={{ background: 'var(--lime)' }} />Passed {passed}%</span>
+            <span><i style={{ background: 'var(--lime)' }} />Score {passed}%</span>
             <span><i style={{ background: 'var(--unsure)' }} />Unsure</span>
             <span><i style={{ background: 'var(--fail)' }} />Failed</span>
             <span><i style={{ background: '#2C3833' }} />Not checked</span>
@@ -393,7 +396,7 @@ function statusMessage(job, events, reviewed, back) {
     case 'CHANGES_REQUESTED':
       return {
         title: `Changes requested. ${amount} is still held.`,
-        text: "The first try didn't pass every check. The worker has one more try to fix it.",
+        text: "The first try didn't pass every check. The worker has one more try: if anything still fails, nothing is paid.",
       };
     case 'NEEDS_REVIEW':
       return {
@@ -401,18 +404,12 @@ function statusMessage(job, events, reviewed, back) {
         text: `${reviewReason(job)} ${amount} stays held until someone reviews the evidence below and settles it.`,
       };
     case 'SETTLED':
-      if (job.settlement === 'VOID') {
-        return {
-          title: 'Hold cancelled. Nothing was paid.',
-          text: reviewed
-            ? `A reviewer decided not to pay, so ${backText} went back to the buyer.`
-            : `The work didn't pass any checks, so ${backText} went back to the buyer.`,
-        };
-      }
+      if (job.settlement === 'VOID') return { title: 'Hold cancelled. Nothing was paid.', text: voidReason(job, reviewed, backText) };
+      // Payouts are all or nothing now; a partial one only exists if set through the review API.
       if (job.settlement === 'PARTIAL') {
         return {
-          title: 'Partly paid for what passed.',
-          text: `${reviewed ? 'A reviewer set this payout.' : 'The work passed part of the checklist.'} The other ${backText} went back to the buyer.`,
+          title: 'Partly paid.',
+          text: `${reviewed ? 'A reviewer set this payout.' : 'Part of the payment was captured.'} The other ${backText} went back to the buyer.`,
         };
       }
       return {
@@ -422,6 +419,24 @@ function statusMessage(job, events, reviewed, back) {
     default:
       return { title: '', text: '' };
   }
+}
+
+// The server's rule marks cheating by this text in a failed "files changed" item (RESTRICTED_FILES_NOTE
+// in server/src/decision.js): the pull request touched a file the checklist protects.
+const RESTRICTED_FILES_NOTE = 'changed files it must not touch';
+const touchedProtectedFiles = (job) =>
+  job.items.some((i) => i.kind === 'files_changed' && i.status === 'FAIL' && String(i.reasoning || '').includes(RESTRICTED_FILES_NOTE));
+
+// Why a hold was cancelled (PLAN.md 5.5, all or nothing).
+function voidReason(job, reviewed, backText) {
+  if (reviewed) return `A reviewer decided not to pay, so ${backText} went back to the buyer.`;
+  if (touchedProtectedFiles(job)) {
+    return `The worker changed files they were not allowed to touch, so the hold was cancelled at once. ${backText} went back to the buyer.`;
+  }
+  if (job.items.some((i) => i.status === 'PASS')) {
+    return `Some checks still failed on the last try, so nothing was paid. Every item must pass. ${backText} went back to the buyer.`;
+  }
+  return `The work didn't pass any checks, so ${backText} went back to the buyer.`;
 }
 
 // The link the buyer sends to the worker. Work is only submitted on that page, never here.

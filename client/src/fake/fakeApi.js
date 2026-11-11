@@ -4,11 +4,12 @@
 // The checker is simulated from timestamps instead of timers: every read moves jobs forward
 // by however much time has passed, so reloading a page mid-check picks up where it left off.
 //
-// The job title picks the outcome, so each path can be tried by hand:
+// Payouts are all or nothing (PLAN.md 5.5). The job title picks the outcome, so each path can be tried by hand:
 //   (default)         first try fails one item, second try passes everything -> FULL
 //   title has "review"   an item comes back UNSURE -> NEEDS_REVIEW
-//   title has "partial"  the same item fails on both tries -> PARTIAL
+//   title has "partial"  the same item fails on both tries -> VOID (nothing is paid on a failed last try)
 //   title has "void"     everything fails on both tries -> VOID
+//   title has "cheat"    a code job's PR changes a protected file -> VOID on the first try, no resubmit
 //   title has "batch"    all results land at once, like the real GitHub checker (combines with the above)
 
 import { cleanPullRequestUrl } from '../pullRequest.js';
@@ -166,8 +167,13 @@ function scenarioOf(job) {
   if (title.includes('review')) return 'review';
   if (title.includes('partial')) return 'partial';
   if (title.includes('void')) return 'void';
+  if (title.includes('cheat')) return 'cheat';
   return 'demo';
 }
+
+// Same text the server's GitHub checker writes when a PR touches a protected file
+// (RESTRICTED_FILES_NOTE in server/src/decision.js); the payout rule treats it as cheating.
+const RESTRICTED_FILES_NOTE = 'changed files it must not touch';
 
 // The item that goes wrong: tests for code jobs, the visual check for website jobs.
 function weakItemIndex(job) {
@@ -197,6 +203,11 @@ function resultFor(job, index) {
     };
   }
 
+  // The cheat PR: tests "pass", but it edited a file the checklist protects.
+  if (scenario === 'cheat' && item.kind === 'files_changed') {
+    return { status: 'FAIL', confidence: 1, reasoning: `The pull request ${RESTRICTED_FILES_NOTE}: tests/checkout.test.js.`, evidence };
+  }
+
   const fails =
     scenario === 'void' ||
     (scenario === 'partial' && isWeak) ||
@@ -208,7 +219,7 @@ function resultFor(job, index) {
       confidence: isVisual ? 0.9 : 1,
       reasoning: {
         tests_pass: '2 of 6 check(s) failed: Rounds to cents (failure), Shipping not discounted (failure)',
-        files_changed: 'A file in src/payment/ was changed, which the checklist does not allow.',
+        files_changed: 'The pull request did not change src/checkout.js.',
         visual: 'The signup button is cut off at the right edge on a 390px screen.',
         interaction: 'Typed an email and clicked Sign up, but no thank-you message appeared.',
       }[item.kind] || 'The check did not pass.',
@@ -250,25 +261,30 @@ function settle(state, job, amount) {
   }
 }
 
-// Decision rule from PLAN.md 5.5.
+// Decision rule from PLAN.md 5.5 (all or nothing), in the same order as server/src/decision.js.
 function decide(state, job) {
-  const passedWeight = job.items.filter((i) => i.status === 'PASS').reduce((sum, i) => sum + i.weight, 0);
-  const notSure = job.items.some((i) => i.status === 'UNSURE' || i.confidence < 0.7);
+  const confident = (i) => i.confidence >= 0.7;
+  const cheated = job.items.some(
+    (i) => i.kind === 'files_changed' && i.status === 'FAIL' && confident(i) && String(i.reasoning).includes(RESTRICTED_FILES_NOTE),
+  );
+  const notSure = job.items.some((i) => i.status === 'UNSURE' || !confident(i));
 
-  if (notSure) {
+  if (cheated) {
+    // Changed a protected file: refund at once, on any try, whatever else passed.
+    settle(state, job, 0);
+  } else if (notSure) {
     job.status = 'NEEDS_REVIEW';
     touch(job);
     addEvent(state, job._id, 'REVIEW_REQUIRED', 'AI was not confident. Waiting for a person to decide');
-  } else if (passedWeight === 100) {
+  } else if (job.items.every((i) => i.status === 'PASS')) {
     settle(state, job, job.amount);
   } else if (job.attempts === 1) {
     job.status = 'CHANGES_REQUESTED';
     touch(job);
     addEvent(state, job._id, 'CHANGES_REQUESTED', `First try failed. ${money(job.amount)} still held, worker can resubmit`);
-  } else if (passedWeight === 0) {
-    settle(state, job, 0);
   } else {
-    settle(state, job, (job.amount * passedWeight) / 100);
+    // Second try and something still fails: nothing is paid.
+    settle(state, job, 0);
   }
 }
 
@@ -387,8 +403,9 @@ function buildSeedState() {
     status: 'SETTLED',
     attempts: 2,
     submissionUrl: 'https://bakery-demo.example.com',
-    payoutAmount: 97.5,
-    settlement: 'PARTIAL',
+    // All or nothing: one item still failed on the second try, so the hold was voided.
+    payoutAmount: 0,
+    settlement: 'VOID',
     ageMinutes: 1440,
   }, [
     passed('The page returned status 200.'),

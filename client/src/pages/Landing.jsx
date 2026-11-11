@@ -3,21 +3,39 @@ import { Link, useLocation } from 'react-router-dom';
 import { CountUp, HoldBar, Icon, ResultIcon, resultOf } from '../components/ui.jsx';
 import { formatMoney } from '../format.js';
 
-// The hero's live example: our demo website job ($200), where the mobile check fails.
+// The hero's live example: our demo website job ($200). Payouts are all or nothing (PLAN.md 5.5),
+// so the story is: try 1, one check fails → changes requested, money held; try 2, all pass → paid in full.
 const DEMO_TOTAL = 200;
 const DEMO_ITEMS = [
-  { text: 'The bakery page loads', weight: 20, final: 'PASS' },
-  { text: 'Signup form has an email field', weight: 30, final: 'PASS' },
-  { text: 'Signing up shows a thank-you message', weight: 30, final: 'PASS' },
-  { text: 'Looks good on mobile', weight: 20, final: 'FAIL' },
+  { text: 'The bakery page loads', weight: 20 },
+  { text: 'Signup form has an email field', weight: 30 },
+  { text: 'Signing up shows a thank-you message', weight: 30 },
+  { text: 'Looks good on mobile', weight: 20 },
 ];
-const SETTLED_TICK = DEMO_ITEMS.length + 2;
-const LOOP_TICKS = SETTLED_TICK + 2;
+const TRY_ONE = ['PASS', 'PASS', 'PASS', 'FAIL'];
+const N = DEMO_ITEMS.length;
+// Ticks: 0 held · 1..N try 1 checks · N+1 changes requested · N+2..2N+1 try 2 checks · 2N+2 settled.
+const CHANGES_TICK = N + 1;
+const TRY_TWO_START = N + 2;
+const SETTLED_TICK = 2 * N + 2;
+const LOOP_TICKS = SETTLED_TICK + 2; // hold the settled frame a little longer before looping
 
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-// Plays the escrow story on a loop: held, each check resolves, PayPal settles.
-// Pauses while the tab is hidden; with reduced motion it shows the settled frame only.
+function demoFrame(tick) {
+  const tryTwo = tick >= TRY_TWO_START;
+  const base = tryTwo ? TRY_TWO_START : 1; // the tick at which this try's first check runs
+  const finals = tryTwo ? DEMO_ITEMS.map(() => 'PASS') : TRY_ONE;
+  const items = DEMO_ITEMS.map((it, i) => {
+    const at = base + i;
+    const status = tick > at ? finals[i] : tick === at && tick < SETTLED_TICK ? 'CHECKING' : 'PENDING';
+    return { ...it, status: tick >= SETTLED_TICK ? 'PASS' : status };
+  });
+  return { items, tryNumber: tryTwo ? 2 : 1 };
+}
+
+// Plays the escrow story on a loop. Explanatory, so slower than UI motion; each step is still
+// a quick color change. Pauses while the tab is hidden; with reduced motion it shows the last frame.
 function HeroDemo() {
   const [still] = useState(reducedMotion);
   const [tick, setTick] = useState(still ? SETTLED_TICK : 0);
@@ -31,39 +49,39 @@ function HeroDemo() {
       document.addEventListener('visibilitychange', onVisible);
       return () => document.removeEventListener('visibilitychange', onVisible);
     }
-    const delay = tick === 0 ? 1600 : tick >= SETTLED_TICK - 1 ? 2200 : 900;
+    const delay = tick === 0 ? 1500 : tick === CHANGES_TICK ? 2200 : tick >= SETTLED_TICK ? 2400 : 850;
     const timer = setTimeout(() => setTick((t) => (t + 1) % LOOP_TICKS), delay);
     return () => clearTimeout(timer);
   }, [tick, still, resumed]);
 
-  const items = DEMO_ITEMS.map((it, i) => ({
-    ...it,
-    status: tick > i + 1 ? it.final : tick === i + 1 ? 'CHECKING' : 'PENDING',
-  }));
+  const { items, tryNumber } = demoFrame(tick);
   const settled = tick >= SETTLED_TICK;
-  const worth = (it) => (DEMO_TOTAL * it.weight) / 100;
-  const paid = items.filter((i) => i.status === 'PASS').reduce((sum, it) => sum + worth(it), 0);
+  const changes = tick === CHANGES_TICK;
   const done = items.filter((i) => i.status === 'PASS' || i.status === 'FAIL').length;
 
+  let lock = 'Checking work';
+  if (tick === 0) lock = 'Held on PayPal';
+  if (changes) lock = 'Changes requested';
+
   return (
-    <div className="vault demo" aria-label="Example job: a $200 bakery landing page being checked and paid out">
+    <div className="vault demo" aria-label="Example job: a $200 bakery landing page, checked twice, then paid in full">
       <div className="demo__head">
         <span className="eyebrow">Job · Bakery landing page</span>
         {settled ? (
           <span className="lock lock--settled">Settled</span>
         ) : (
-          <span className="lock">
+          <span className={`lock${changes ? ' lock--warn' : ''}`}>
             <b />
-            {tick === 0 ? 'Held on PayPal' : 'Checking work'}
+            {lock}
           </span>
         )}
       </div>
       <div style={{ marginTop: 26 }}>
         <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-          {settled ? 'Released to the worker' : 'In escrow'}
+          {settled ? 'Released to the worker' : changes ? 'Still held. One more try.' : 'In escrow'}
         </div>
         <div className="vault__amt" style={{ fontSize: 64 }}>
-          {settled ? <CountUp key="paid" value={paid} animate={!still} /> : formatMoney(DEMO_TOTAL)}
+          {settled ? <CountUp key="paid" value={DEMO_TOTAL} animate={!still} /> : formatMoney(DEMO_TOTAL)}
           <small>USD</small>
         </div>
       </div>
@@ -73,8 +91,8 @@ function HeroDemo() {
           style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 9, fontFamily: 'var(--mono)', fontSize: 11 }}
           className="muted"
         >
-          <span>{done}/{items.length} checked</span>
-          <span>each segment = share of the payment</span>
+          <span>{settled ? 'Every item passed' : `${done}/${items.length} checked · try ${tryNumber} of 2`}</span>
+          <span>every item must pass</span>
         </div>
       </div>
       <div>
@@ -89,18 +107,17 @@ function HeroDemo() {
             </span>
             <span className="t">{it.text}</span>
             <span className="w">{it.weight}%</span>
-            <span className="v">{formatMoney(worth(it))}</span>
           </div>
         ))}
       </div>
-      <div className="demo__split" style={{ opacity: settled ? 1 : 0.35 }}>
-        <div className="demo__box">
+      <div className="demo__split">
+        <div className="demo__box" style={{ opacity: settled ? 1 : 0.35 }}>
           <span className="eyebrow">PayPal capture · worker</span>
-          <span className="mono" style={{ color: 'var(--lime)' }}>{settled ? formatMoney(paid) : '—'}</span>
+          <span className="mono" style={{ color: 'var(--lime)' }}>{settled ? formatMoney(DEMO_TOTAL) : '—'}</span>
         </div>
         <div className="demo__box">
-          <span className="eyebrow">Released · buyer</span>
-          <span className="mono">{settled ? formatMoney(DEMO_TOTAL - paid) : '—'}</span>
+          <span className="eyebrow">Try</span>
+          <span className="mono">{tryNumber} of 2</span>
         </div>
       </div>
     </div>
@@ -121,7 +138,7 @@ function StepViz({ n }) {
     null,
     ['PENDING', 'PENDING', 'PENDING'],
     ['PASS', 'CHECKING', 'PENDING'],
-    ['PASS', 'PASS', 'FAIL'],
+    ['PASS', 'PASS', 'PASS'], // released: every item passed
   ][n];
   return <HoldBar items={bars.map((status, i) => ({ weight: [40, 30, 30][i], status }))} height={10} label="" />;
 }
@@ -130,19 +147,21 @@ const STEPS = [
   ['Agree', 'Buyer', 'Describe the job in plain English. AI turns it into a weighted checklist you approve. The checklist is the contract.'],
   ['Hold', 'PayPal', 'You approve the payment on PayPal. It is authorized and held, not charged.'],
   ['Prove', 'Worker', 'The worker submits a pull request or a live URL. Every item is checked against real evidence.'],
-  ['Release', 'Veriflow', 'A fixed rule decides the payout. PayPal captures what passed and releases the rest.'],
+  ['Release', 'Veriflow', 'A fixed rule decides: every item passes and PayPal pays in full. Otherwise the hold goes back to the buyer.'],
 ];
 
+// The payout rule (PLAN.md 5.5): all or nothing.
 const RULES = [
-  { title: 'Every item passes', text: 'Full payment is captured to the worker.', bar: ['PASS', 'PASS', 'PASS'] },
-  { title: 'Some fail on try one', text: 'Money stays held. The worker gets one chance to fix and resubmit.', bar: ['PASS', 'FAIL', 'PASS'] },
-  { title: 'Some still fail on try two', text: 'Partial payment for what passed. The rest goes back to the buyer.', bar: ['PASS', 'FAIL', 'PASS'], split: true },
+  { title: 'Every item passes', text: 'The full amount is captured to the worker.', bar: ['PASS', 'PASS', 'PASS'], note: ['100% paid'] },
+  { title: 'Something fails on try one', text: 'Money stays held. The worker gets one chance to fix and resubmit.', bar: ['PASS', 'FAIL', 'PASS'], note: ['still held'] },
+  { title: 'Something still fails on try two', text: 'Nothing is paid. The whole hold goes back to the buyer.', bar: ['PASS', 'FAIL', 'PASS'], note: ['0% paid', '100% back'] },
+  { title: 'A protected file was changed', text: "Editing the buyer's tests or CI voids the job at once, even on the first try. No second chance.", bar: ['PASS', 'PASS', 'FAIL'], note: ['voided at once'] },
   { title: 'AI is unsure, or under 70% confident', text: 'A person decides. Nothing moves until they do.', bar: ['PASS', 'UNSURE', 'PASS'] },
 ];
 
 const CHECKS = [
   ['code', 'Code', 'Tests pass', 'Reads the GitHub Actions results on the pull request.', 'GitHub REST API'],
-  ['file', 'Code', 'Files changed', "Which files the pull request must, or must not, touch. The buyer's tests are protected automatically.", 'GitHub REST API'],
+  ['file', 'Code', 'Files changed', "Which files the pull request must, or must not, touch. The buyer's tests are protected automatically; touching them voids the job.", 'GitHub REST API'],
   ['globe', 'Website', 'Page loads & elements', 'A real browser opens the site and finds the elements and text.', 'Playwright · Chromium'],
   ['cursor', 'Website', 'Interaction (AI)', 'The AI types and clicks like a user, then judges what happened.', 'Playwright · Gemini'],
   ['eye', 'Website', 'Visual check (AI)', 'AI judges desktop and mobile screenshots against the requirement.', 'Gemini vision'],
@@ -173,7 +192,7 @@ export default function Landing() {
           </h1>
           <p className="hero__sub">
             Veriflow holds the payment on PayPal, checks the delivered work against a checklist you both agreed on, and
-            pays out exactly what passed. No one has to trust first.
+            pays only when every item passes. No one has to trust first.
           </p>
           <div className="hero__cta">
             <Link className="btn btn--primary btn--lg" to="/jobs/new">
@@ -199,7 +218,7 @@ export default function Landing() {
             <br />
             Zero chasing.
           </h2>
-          <p>The checklist you approve is the contract. Each item carries a weight, and that weight is its share of the money.</p>
+          <p>The checklist you approve is the contract. Each item carries a weight: how much it counts toward the score. The money moves only when every item passes.</p>
         </div>
         <ol className="steps">
           {STEPS.map(([title, who, text], i) => (
@@ -228,8 +247,10 @@ export default function Landing() {
             <div className="card rule" key={rule.title}>
               <div className="rule__viz" aria-hidden="true">
                 <HoldBar items={rule.bar.map((status, i) => ({ weight: [40, 30, 30][i], status }))} height={10} label="" />
-                {rule.split && (
-                  <div className="rule__split"><span>70% paid</span><span>30% back</span></div>
+                {rule.note && (
+                  <div className="rule__split">
+                    {rule.note.map((n) => <span key={n}>{n}</span>)}
+                  </div>
                 )}
               </div>
               <div>

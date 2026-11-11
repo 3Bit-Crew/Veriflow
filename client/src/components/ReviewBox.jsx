@@ -3,8 +3,6 @@ import { reviewJob } from '../api.js';
 import { formatMoney } from '../format.js';
 import { HoldBar } from './ui.jsx';
 
-// Same rounding the server uses (roundDown2 in server/src/paypal/settle.js).
-const roundDown2 = (n) => Math.floor(n * 100 + 1e-9) / 100;
 const CONFIDENCE_THRESHOLD = 0.7; // PLAN.md 5.5
 const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
 
@@ -13,9 +11,9 @@ const isResult = (status) => status === 'PASS' || status === 'FAIL' || status ==
 export const needsDecision = (item) =>
   item.status === 'UNSURE' || !isResult(item.status) || !(Number(item.confidence) >= CONFIDENCE_THRESHOLD);
 
-// For NEEDS_REVIEW jobs: the reviewer marks each undecided item Pass or Fail, the payout is
-// the weight of everything that passed, and POST /api/jobs/:id/review settles it on PayPal.
-// Paying out can't be undone, so it takes a confirm click.
+// For NEEDS_REVIEW jobs: the reviewer marks each undecided item Pass or Fail. Payouts are all or
+// nothing (PLAN.md 5.5): every item passes → the full amount, anything fails → $0 (the hold is
+// cancelled). POST /api/jobs/:id/review settles it on PayPal. It can't be undone, so it takes a confirm click.
 export default function ReviewBox({ job, onSettled }) {
   const money = (n) => formatMoney(n, job.currency);
   const open = job.items.map((item, index) => ({ item, index })).filter(({ item }) => needsDecision(item));
@@ -25,9 +23,9 @@ export default function ReviewBox({ job, onSettled }) {
   const [error, setError] = useState(null);
 
   const resolved = job.items.map((item, i) => (needsDecision(item) ? { ...item, status: decisions[i] || 'UNSURE' } : item));
-  const passedWeight = resolved.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
-  const payout = roundDown2((job.amount * passedWeight) / 100);
-  const back = Math.round((job.amount - payout) * 100) / 100;
+  const allPass = resolved.every((item) => item.status === 'PASS');
+  const payout = allPass ? job.amount : 0;
+  const back = job.amount - payout;
   const ready = open.every(({ index }) => decisions[index]);
 
   function decide(index, value) {
@@ -60,16 +58,14 @@ export default function ReviewBox({ job, onSettled }) {
 
       {open.length === 0 && (
         <p className="muted" style={{ fontSize: 13, padding: '6px 0' }}>
-          Every item already has a confident result. Settling pays for the items that passed.
+          Every item already has a confident result. Settling pays in full only if every item passed; otherwise it
+          cancels the hold.
         </p>
       )}
 
       {open.map(({ item, index }) => (
         <div className="review__row" key={item._id || index}>
-          <span>
-            {item.text}
-            <span className="mono">{money((job.amount * item.weight) / 100)}</span>
-          </span>
+          <span>{item.text}</span>
           <div className="tg" role="group" aria-label={`Decide: ${item.text}`}>
             <button
               type="button"
@@ -94,6 +90,7 @@ export default function ReviewBox({ job, onSettled }) {
       <div style={{ marginTop: 14 }}>
         <HoldBar items={resolved} dark height={8} />
       </div>
+      <p className="hint" style={{ marginTop: 8 }}>All or nothing: every item must pass for the worker to be paid. One Fail cancels the hold.</p>
 
       <div className="review__foot">
         <span style={{ fontSize: 13 }} aria-live="polite">
