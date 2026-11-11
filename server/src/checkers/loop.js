@@ -126,10 +126,11 @@ export async function processNextJob() {
   const id = String(job._id);
 
   try {
-    // A new attempt starts only when we're not just re-polling running tests.
+    // job.attempts is counted ONCE, by the submit route (A's routes/jobs.js), when the worker submits.
+    // Never here: a restart empties `waiting`, so counting here would turn a re-checked first try
+    // into a "second try" and settle the money instead of asking for changes.
+    // Log only when we're not just re-polling running tests.
     if (!waiting.has(id)) {
-      job.attempts = (job.attempts || 0) + 1;
-      await job.save();
       await logEvent(job._id, 'CHECK_STARTED', `Checking try ${job.attempts} of the ${job.type} job: ${job.submissionUrl}`, {
         attempt: job.attempts,
       });
@@ -196,8 +197,8 @@ export async function processNextJob() {
 
 // Put abandoned jobs back in the queue: CHECKING, but untouched for STALE_CHECKING_MS.
 // Only old ones: during a Render deploy the old server is still checking its job while the
-// new one starts, and re-queuing that job would check it twice (attempts +2, so a first try
-// would be judged as the second try and paid out instead of getting "changes requested").
+// new one starts, and re-queuing that job too early would check it twice at the same time.
+// Re-checking is safe for the try count: attempts is set at submit time, not here.
 export async function requeueStaleJobs() {
   const cutoff = new Date(Date.now() - STALE_CHECKING_MS);
   const stale = await Job.find({ status: 'CHECKING', updatedAt: { $lt: cutoff } }).select('_id');

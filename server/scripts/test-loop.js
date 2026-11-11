@@ -16,7 +16,7 @@ if (process.env.DNS_SERVERS) dns.setServers(process.env.DNS_SERVERS.split(','));
 const keep = process.argv.includes('--keep');
 const PR = 'https://github.com/expressjs/express/pull/7590'; // real PR: tests pass, changes only test/ files
 
-const base = { description: 'Test job created by scripts/test-loop.js', amount: 200, workerEmail: 'worker@example.com', status: 'SUBMITTED' };
+const base = { description: 'Test job created by scripts/test-loop.js', amount: 200, workerEmail: 'worker@example.com', status: 'SUBMITTED', attempts: 1 }; // 1 = first submit, as K's /submit route counts it
 const JOBS = {
   codePass: {
     ...base,
@@ -100,7 +100,7 @@ await runUntilIdle();
 console.log('\nWorker resubmits the job that got CHANGES_REQUESTED (as K\'s /submit route would):');
 await Job.updateOne(
   { _id: ids.codeFailTwice, status: 'CHANGES_REQUESTED' },
-  { $set: { status: 'SUBMITTED', 'items.$[].status': 'PENDING' } }
+  { $set: { status: 'SUBMITTED', 'items.$[].status': 'PENDING' }, $inc: { attempts: 1 } }
 );
 await runUntilIdle();
 
