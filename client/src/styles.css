@@ -293,6 +293,11 @@ select {
     text-decoration: underline;
   }
 
+  .remove-button:hover {
+    background: var(--bad-bg);
+    color: var(--bad-ink);
+  }
+
   .button:hover:not(:disabled) {
     border-color: var(--ink-soft);
   }
@@ -587,6 +592,65 @@ textarea.input {
 .checklist-editor__kind .muted {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Remove sits at the right end of the item's top line. */
+.remove-button {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 160ms var(--ease-out),
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.remove-button:active {
+  transform: scale(0.97);
+}
+
+.required-note {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.undo-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--neutral-bg);
+  font-size: 0.925rem;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .checklist-editor__fields {
@@ -1228,8 +1292,15 @@ textarea.input {
   }
 
   .button:active:not(:disabled),
-  .fake-chip:active {
+  .fake-chip:active,
+  .remove-button:active {
     transform: none;
+  }
+
+  .undo-note {
+    @starting-style {
+      transform: none;
+    }
   }
 
   .checklist-editor__item {
