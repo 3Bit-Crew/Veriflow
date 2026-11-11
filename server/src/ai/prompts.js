@@ -17,7 +17,10 @@ const KIND_HELP = {
 - "element_exists": a CSS selector is present when the page first loads. params: { "selector": "input[type=email]" }
 - "text_present": some visible text is on the page when it first loads. params: { "text": "Sign up" }
 - "visual": a subjective look-and-feel requirement judged from a screenshot of the page as it first loads. params: { "viewport": "mobile" } or { "viewport": "desktop" }
-- "speed_score": Google PageSpeed performance score at least min. params: { "min": 80 }${interactionEnabled() ? INTERACTION_HELP : ''}`,
+- "speed_score": Google PageSpeed performance score at least min. params: { "min": 80 }
+- "lighthouse_score": a Google Lighthouse score at least min, for ONE of these categories:
+  "accessibility" (works with screen readers, readable contrast, labelled fields), "best-practices" (HTTPS, no errors), "seo" (findable on Google: title, description).
+  params: { "category": "accessibility", "min": 90 }. Use it only when the description asks for that quality, at most one item per category. For speed use "speed_score".${interactionEnabled() ? INTERACTION_HELP : ''}`,
 };
 
 // Extra rules for website checklists. Nobody has seen the site's code, so CSS class names are guesses.
