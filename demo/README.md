@@ -41,6 +41,25 @@ Needs Node.js 22 or newer. No packages to install. In the demo repo:
 npm test
 ```
 
-## Demo website
+## Demo website: [3Bit-Crew/veriflow-demo-site](https://github.com/3Bit-Crew/veriflow-demo-site)
 
-To do: a bakery landing page in a good and a broken version (the "Sign up" button cut off on a 390px phone screen), hosted on GitHub Pages or Render Static Site. See PLAN.md 10.1.
+A made-up bakery landing page ("Hearth & Crumb"), hosted on GitHub Pages. Two versions of the same page:
+
+| Version | URL to submit | On a phone (390px) |
+|---|---|---|
+| Good | `https://3bit-crew.github.io/veriflow-demo-site/good/` | Everything fits. The "Sign up" button goes under the email field. |
+| Broken | `https://3bit-crew.github.io/veriflow-demo-site/broken/` | The "Sign up" button is cut off at the right edge ("Sign" shows, "up" doesn't) |
+
+On a desktop screen both look the same. The two versions differ only in the signup row's CSS.
+
+**Job description to type** (type: Website):
+> Landing page for my bakery with the headline "Fresh every morning", a signup form with an email field and a "Sign up" button. Signing up shows a thank-you message. Must look good on mobile.
+
+What each check finds on both versions:
+- the page loads, with an email field (`input[type=email]`), the headline and a "Sign up" button
+- typing an email and clicking "Sign up" shows "Thank you, you're on the list!" in place of the form, without loading a new page (for the AI interaction check)
+- **only on `broken/`, on a phone**: the button is cut off, which the AI's mobile screenshot check should flag
+
+**Pre-run for the video (PLAN.md 10.2):** submit the broken URL. The first try ends in "Changes requested". Then submit the broken URL again: the second try ends in a partial payout. Submitting the good URL as the second try instead pays in full.
+
+Checked on Nov 11 in a real browser at the checker's screen sizes (1280×800 and 390×844): every item above behaves as described.
