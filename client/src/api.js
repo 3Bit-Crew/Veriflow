@@ -6,24 +6,54 @@ export const isFakeApi = import.meta.env.VITE_USE_FAKE_API === 'true';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Render's free plan puts the server to sleep when nobody uses it, and the first request
+// then takes up to a minute. Requests slower than SLOW_MS are counted, so the app can say so
+// (WakeNotice) instead of looking stuck.
+const SLOW_MS = 5000;
+let slowRequests = 0;
+const slowListeners = new Set();
+
+function changeSlowRequests(by) {
+  slowRequests += by;
+  slowListeners.forEach((listener) => listener());
+}
+
+export function subscribeSlowRequests(listener) {
+  slowListeners.add(listener);
+  return () => slowListeners.delete(listener);
+}
+
+export const getSlowRequests = () => slowRequests;
+
 // Failed calls throw an Error with the server's message and an HTTP `status`.
 async function request(method, path, body) {
-  let res;
-  try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    throw Object.assign(new Error('Could not reach the server. Check your connection and try again.'), { status: 0 });
-  }
+  let slow = false;
+  const timer = setTimeout(() => {
+    slow = true;
+    changeSlowRequests(1);
+  }, SLOW_MS);
 
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status });
+  try {
+    let res;
+    try {
+      res = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch {
+      throw Object.assign(new Error('Could not reach the server. Check your connection and try again.'), { status: 0 });
+    }
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status });
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+    if (slow) changeSlowRequests(-1);
   }
-  return data;
 }
 
 const real = {

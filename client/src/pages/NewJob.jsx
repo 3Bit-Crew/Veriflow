@@ -11,8 +11,13 @@ const STEPS = ['Describe the job', 'Approve the checklist', 'Hold the payment'];
 // only this worker email (PAYPAL_WORKER_EMAIL, PLAN.md 5.8), so the form starts with it.
 const SANDBOX_WORKER_EMAIL = 'sb-m8uku53787938@business.example.com';
 
+const TITLE_PLACEHOLDERS = {
+  code: 'Add coupon codes',
+  website: 'Bakery landing page',
+};
+
 const PLACEHOLDERS = {
-  code: 'Fix the login bug so emails with capital letters work. All tests must pass. Don\'t change the database code.',
+  code: 'Add coupon codes to src/checkout.js: SAVE10 = 10% off the items. All tests must pass. Don\'t change anything in src/payment/.',
   website: 'Landing page with the headline "Fresh every morning" and a signup form with an email field and a "Sign up" button. Must look good on mobile.',
 };
 
@@ -240,7 +245,7 @@ function JobDetailsForm({ onSubmit }) {
 
       <div className="field">
         <label htmlFor="title">Title</label>
-        <input id="title" className="input" required value={values.title} onChange={set('title')} placeholder="Fix the login bug" />
+        <input id="title" className="input" required value={values.title} onChange={set('title')} placeholder={TITLE_PLACEHOLDERS[values.type]} />
       </div>
 
       <div className="field">

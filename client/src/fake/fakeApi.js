@@ -91,9 +91,9 @@ function checklistFor(job) {
     return [
       { text: 'All automated tests pass', kind: 'tests_pass', params: {}, weight: 60 },
       {
-        text: 'Login code changed, database code left alone',
+        text: 'Checkout code changed, payment code left alone',
         kind: 'files_changed',
-        params: { mustTouch: ['src/login.js'], mustNotTouch: ['src/db/'] },
+        params: { mustTouch: ['src/checkout.js'], mustNotTouch: ['src/payment/'] },
         weight: 40,
       },
     ];
@@ -207,8 +207,8 @@ function resultFor(job, index) {
       status: 'FAIL',
       confidence: isVisual ? 0.9 : 1,
       reasoning: {
-        tests_pass: '1 of 6 checks failed: "login accepts capital letters in the email".',
-        files_changed: 'A file in src/db/ was changed, which the checklist does not allow.',
+        tests_pass: '2 of 6 check(s) failed: Rounds to cents (failure), Shipping not discounted (failure)',
+        files_changed: 'A file in src/payment/ was changed, which the checklist does not allow.',
         visual: 'The signup button is cut off at the right edge on a 390px screen.',
         interaction: 'Typed an email and clicked Sign up, but no thank-you message appeared.',
       }[item.kind] || 'The check did not pass.',
@@ -431,8 +431,8 @@ function buildSeedState() {
   ]);
 
   seedJob(state, {
-    title: 'Fix the login bug',
-    description: 'Users cannot log in when their email has capital letters. All tests must pass. Do not change the database code.',
+    title: 'Add coupon codes to the checkout',
+    description: "Add coupon codes to src/checkout.js: SAVE10 = 10% off the items, FREESHIP = free shipping. Totals must be correct to the cent. Don't change anything in src/payment/.",
     type: 'code',
     repoUrl: REPO,
     amount: 200,
@@ -441,7 +441,7 @@ function buildSeedState() {
     submissionUrl: `${REPO}/pull/7`,
     ageMinutes: 120,
   }, [
-    failed('1 of 6 checks failed: "login accepts capital letters in the email".', { evidence: { screenshots: [], logUrl: `${REPO}/actions` } }),
+    failed('2 of 6 check(s) failed: Rounds to cents (failure), Shipping not discounted (failure)', { evidence: { screenshots: [], logUrl: `${REPO}/actions` } }),
     passed('Only the allowed files were changed.'),
   ]);
 

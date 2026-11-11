@@ -5,6 +5,7 @@ import Landing from './pages/Landing.jsx';
 import NewJob from './pages/NewJob.jsx';
 import Submit from './pages/Submit.jsx';
 import JobStatus from './pages/JobStatus.jsx';
+import WakeNotice from './components/WakeNotice.jsx';
 
 // AG Grid is large, so the dashboard loads only when it's opened.
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
+      <WakeNotice />
     </>
   );
 }
