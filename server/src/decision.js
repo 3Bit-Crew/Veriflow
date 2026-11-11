@@ -5,10 +5,20 @@
 //             'CHANGES_REQUESTED' → 1st try failed, worker may resubmit (money stays held)
 //             'SETTLE'            → call settleJob(job, amount); amount 0 = refund (void)
 //
+// All or nothing: the worker is paid in full only when every item passes. No partial payouts.
+// Changing a file the checklist says must not be touched counts as cheating: refund at once, no resubmit.
+//
 // Expects every item to have been checked (status PASS / FAIL / UNSURE, plus confidence).
-import { roundDown2 } from './paypal/settle.js';
 
 export const CONFIDENCE_THRESHOLD = 0.7;
+
+// github.js puts this text in the reasoning of a files_changed item that touched a forbidden file.
+export const RESTRICTED_FILES_NOTE = 'changed files it must not touch';
+
+const isConfident = (i) => Number(i.confidence) >= CONFIDENCE_THRESHOLD;
+
+const touchedRestrictedFiles = (i) =>
+  i.kind === 'files_changed' && i.status === 'FAIL' && isConfident(i) && String(i.reasoning || '').includes(RESTRICTED_FILES_NOTE);
 
 export function decide(job) {
   const items = job.items || [];
@@ -16,10 +26,19 @@ export function decide(job) {
   const passedCount = items.filter((i) => i.status === 'PASS').length;
   const summary = `${passedCount}/${items.length} checks passed (${passedWeight}/100)`;
 
-  // 1. Not sure about something → a human decides. PENDING counts as unsure (it was never checked).
-  const unsure = items.filter(
-    (i) => i.status === 'UNSURE' || i.status === 'PENDING' || !(Number(i.confidence) >= CONFIDENCE_THRESHOLD)
-  );
+  // 1. Cheating: changed a restricted file → refund the buyer now, on any try, whatever else passed.
+  const cheated = items.filter(touchedRestrictedFiles);
+  if (cheated.length > 0) {
+    return {
+      action: 'SETTLE',
+      amount: 0,
+      passedWeight,
+      reason: `${summary}. The worker changed files they were not allowed to touch (${cheated.map((i) => `"${i.text}"`).join(', ')}). Payment voided, no resubmit.`,
+    };
+  }
+
+  // 2. Not sure about something → a human decides. PENDING counts as unsure (it was never checked).
+  const unsure = items.filter((i) => i.status === 'UNSURE' || i.status === 'PENDING' || !isConfident(i));
   if (items.length === 0 || unsure.length > 0) {
     const names = unsure.map((i) => `"${i.text}"`).join(', ');
     return {
@@ -30,12 +49,12 @@ export function decide(job) {
     };
   }
 
-  // 2. Everything passed → full payment.
-  if (passedWeight >= 100) {
+  // 3. Everything passed → full payment.
+  if (items.every((i) => i.status === 'PASS')) {
     return { action: 'SETTLE', amount: job.amount, passedWeight, reason: `${summary}. Full payment.` };
   }
 
-  // 3. First try with failures → worker gets one chance to fix it.
+  // 4. First try with failures → worker gets one chance to fix it.
   if ((job.attempts || 0) <= 1) {
     return {
       action: 'CHANGES_REQUESTED',
@@ -45,12 +64,6 @@ export function decide(job) {
     };
   }
 
-  // 4. Second try, nothing passed → refund the buyer.
-  if (passedWeight === 0) {
-    return { action: 'SETTLE', amount: 0, passedWeight, reason: `${summary} on the second try. Payment voided.` };
-  }
-
-  // 5. Second try, some passed → pay for what passed.
-  const amount = roundDown2((job.amount * passedWeight) / 100);
-  return { action: 'SETTLE', amount, passedWeight, reason: `${summary} on the second try. Partial payment.` };
+  // 5. Second try and something still fails → nothing is paid, the buyer gets the money back.
+  return { action: 'SETTLE', amount: 0, passedWeight, reason: `${summary} on the second try. Every item must pass, so the payment is voided.` };
 }

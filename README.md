@@ -37,10 +37,10 @@ The AI never moves money. It only reports a result and a confidence for each ite
 | Result | What happens |
 |---|---|
 | Any item is unsure, or confidence is below 0.7 | A person decides the payout. The money stays held. |
-| Every item passes | Full payment to the worker |
+| Every item passes | Full payment to the worker. There are no partial payments. |
+| The pull request changed a file it was not allowed to touch | Treated as cheating. The hold is cancelled at once, with no resubmit. |
 | Some items fail on the first try | The money stays held and the worker gets one chance to fix and resubmit |
-| Some items still fail on the second try | Partial payment for the items that passed. The rest goes back to the buyer. |
-| Nothing passes on the second try | The hold is cancelled. The buyer pays nothing. |
+| Any item still fails on the second try | The hold is cancelled. The worker gets nothing and the buyer pays nothing. |
 
 Every step is written to an audit log that is shown on the job page.
 
