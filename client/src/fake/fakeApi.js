@@ -11,6 +11,8 @@
 //   title has "void"     everything fails on both tries -> VOID
 //   title has "batch"    all results land at once, like the real GitHub checker (combines with the above)
 
+import { cleanPullRequestUrl } from '../pullRequest.js';
+
 const STORAGE_KEY = 'veriflow.fakeApi.v1';
 const STEP_MS = 1500; // time between each simulated check
 const LATENCY_MS = 150;
@@ -620,12 +622,11 @@ export function submitWork(id, submissionUrl) {
   return call((state) => {
     const job = findJob(state, id);
     requireStatus(job, 'FUNDED', 'CHANGES_REQUESTED');
-    const url = (submissionUrl || '').trim();
+    let url = (submissionUrl || '').trim();
     if (job.type === 'code') {
-      const prPrefix = `${job.repoUrl}/pull/`;
-      if (!url.startsWith(prPrefix) || !/^\d+\/?$/.test(url.slice(prPrefix.length))) {
-        fail(400, `Submit a pull request from this job's repo, like ${prPrefix}123`);
-      }
+      // Like the server: accept a copied PR link, save its clean form.
+      url = cleanPullRequestUrl(job.repoUrl, url);
+      if (!url) fail(400, `Submit a pull request from this job's repo, like ${job.repoUrl}/pull/123`);
     } else if (!url.startsWith('http')) {
       fail(400, 'Website URL must start with http');
     }

@@ -4,13 +4,13 @@ import { getJob, submitWork } from '../api.js';
 import ChecklistView from '../components/ChecklistView.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { formatMoney } from '../format.js';
+import { cleanPullRequestUrl } from '../pullRequest.js';
 
 // Same rules as the submit route (PLAN.md 5.8), so mistakes show before a round trip.
 function submissionProblem(job, url) {
   if (job.type === 'code') {
-    const prefix = `${job.repoUrl}/pull/`;
-    if (!url.startsWith(prefix) || !/^\d+\/?$/.test(url.slice(prefix.length))) {
-      return `Use a pull request from ${job.repoUrl.replace('https://github.com/', '')}, like ${prefix}123`;
+    if (!cleanPullRequestUrl(job.repoUrl, url)) {
+      return `Use a pull request from ${job.repoUrl.replace('https://github.com/', '')}, like ${job.repoUrl}/pull/123`;
     }
     return null;
   }
