@@ -3,13 +3,17 @@
 **Veriflow** is a pay-on-proof escrow: money is released only after the work is verified.
 
 **Hackathon:** PayPal AI Hackathon (Devpost)
-**Deadline:** November 12, 2026. Check the exact time and timezone on the Devpost page. Some sites list Nov 13 in India time. **We aim to submit on Nov 11 at night.**
+**Deadline:** November 12, 2026, 12:00 PM Pacific (about 1:30 am IST on Nov 13). **We aim to submit on Nov 12, ~10 pm IST** (section 13).
 **Team:** 3 people. Roles are in section 6.
 **Stack:** MERN (MongoDB, Express, React, Node) + PayPal Sandbox + free Gemini / Groq AI key
 
 > **How to read this:** sections 1–4 explain the project. **Section 5 is the contract between the three of us.** If your code matches section 5, it will fit with everyone else's. If you need to change section 5, tell the other two first and update this file.
 
-> **Latest changes (Nov 11):**
+> **Latest changes (Nov 11–12):**
+> - **Payouts are all or nothing (5.5):** the worker is paid only when every item passes. A second try that still fails anything voids the hold ($0). Changing a protected file (for example the buyer's tests) voids it at once, even on the first try. Weights no longer split the money: they only say how much an item counts toward the score. The review box marks unsure items Pass or Fail: all Pass pays in full, any Fail pays $0. A hybrid rule is planned for after the hackathon (section 14).
+> - **Tries are counted when the worker submits** (`POST /submit`), not when checking starts, so a server restart can't use up a try (5.5).
+> - **New frontend design** with an AG Grid dashboard (filter chips, totals row, live cell flash, CSV export). The worker submits only on `/jobs/:id/submit`; the job page shows the worker link instead. Results that land together are shown about 1 second apart.
+> - **Demo website is live** on GitHub Pages (10.1), and a **keep-awake ping** (GitHub Actions, every 10 minutes) stops the Render API from sleeping (11).
 > - **New dates and final work plan in section 13:** code freeze **Nov 12, 4 pm IST**, submit by **Nov 12, ~10 pm IST**. These replace the Nov 11 dates in section 7. Section 13 also covers interaction checks, Lighthouse scores and the PageSpeed key.
 > - **New demo:** the code job is now a **checkout coupon feature**, not the login bug. Section 10 has everything: what the demo repo and site contain, how to prepare, and the script. **B:** the demo repo runs each test as its own GitHub Actions job, so `github.js` names the failed tests (10.1). No code change needed.
 > - **Worker email:** on Render, `POST /api/jobs` only accepts the sandbox worker account set in `PAYPAL_WORKER_EMAIL` (5.8). Use `sb-m8uku53787938@business.example.com`.
@@ -54,7 +58,7 @@ A worker's coupon feature PR comes in with two money bugs → **2 of 6 tests fai
 |---|---|
 | **Grand prizes** ($12k / $8k / $5k) | New idea, real problem, strong demo |
 | **Best Use of Agentic Commerce** ($5k) | AI agents can hire and pay other agents safely |
-| **Best Use of PayPal + AI** ($5k) | AI decides when and how much PayPal pays |
+| **Best Use of PayPal + AI** ($5k) | AI checks the work and decides whether PayPal pays, from real evidence |
 | **Best Demo Delivery** ($5k) | The live "money released" moment |
 | **Best Use of AG Grid** ($5k / $2k / 3 × $1k) | Our dashboard is built with AG Grid (React) |
 | **Best Use of Render** (credits) | Frontend and backend hosted on Render |
@@ -67,22 +71,22 @@ Use Postman **only** on day 1 to try PayPal's API collection.
 ## 3. What we build (scope)
 
 ### Must have (the project fails without these)
-- [ ] Create a job → AI generates a checklist → buyer edits and approves it
-- [ ] Buyer pays with the PayPal button → money **held** (authorized)
-- [ ] Worker submits a **GitHub PR** or a **website URL**
-- [ ] **Code checker:** reads the PR's test results from GitHub Actions and which files were changed
-- [ ] **Website checker:** Playwright opens the site, takes screenshots, and checks elements. AI reviews the screenshots.
-- [ ] **Decision engine:** full capture / one resubmit / void / needs review (section 5.5)
-- [ ] **Resubmit once** after a failed first try (the demo depends on it)
-- [ ] **Human review:** approve or set a payout when a job is `NEEDS_REVIEW`
-- [ ] **AG Grid dashboard:** jobs, checklist results, audit log
-- [ ] Deployed on **Render**, working live with PayPal **Sandbox**
+- [x] Create a job → AI generates a checklist → buyer edits and approves it
+- [x] Buyer pays with the PayPal button → money **held** (authorized)
+- [x] Worker submits a **GitHub PR** or a **website URL**
+- [x] **Code checker:** reads the PR's test results from GitHub Actions and which files were changed
+- [x] **Website checker:** Playwright opens the site, takes screenshots, and checks elements. AI reviews the screenshots.
+- [x] **Decision engine:** full capture / one resubmit / void / needs review (section 5.5)
+- [x] **Resubmit once** after a failed first try (the demo depends on it)
+- [x] **Human review:** mark each unsure item Pass or Fail when a job is `NEEDS_REVIEW`. All Pass → paid in full, any Fail → hold cancelled.
+- [x] **AG Grid dashboard:** jobs, checklist results, audit log
+- [ ] Deployed on **Render**, working live with PayPal **Sandbox** (deployed; a full code job still has to pass live)
 - [ ] Demo video + Devpost write-up
 
 ### Should have (if on schedule by day 4)
 - [ ] **Agent API:** lets an AI agent post jobs, submit work, and check status using an API key (an MCP server too if time allows). This is our Agentic Commerce story.
-- [ ] PageSpeed `speed_score` check
-- [ ] Nicer evidence report (screenshots side by side, test log link)
+- [x] PageSpeed `speed_score` check (plus Lighthouse scores, 13.2)
+- [x] Nicer evidence report (screenshots side by side, test log link)
 
 ### Won't build (say "future work" in the pitch)
 - Design and writing checkers, real money (live mode), user accounts with passwords, mobile app.
@@ -236,19 +240,20 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 | `kind` | Job type | `params` | Checked by | Required? |
 |---|---|---|---|---|
 | `tests_pass` | code | `{}` (all GitHub Actions checks on the PR must succeed) | GitHub API | Must |
-| `files_changed` | code | `{ "mustTouch": ["src/login.js"], "mustNotTouch": ["src/db/"] }` | GitHub API | Must |
+| `files_changed` | code | `{ "mustTouch": ["src/checkout.js"], "mustNotTouch": ["src/payment/"] }` | GitHub API | Must |
 | `page_loads` | website | `{ "path": "/" }` | Playwright (status 200) | Must |
 | `element_exists` | website | `{ "selector": "input[type=email]" }` | Playwright | Must |
 | `text_present` | website | `{ "text": "Sign up" }` | Playwright | Must |
 | `visual` | website | `{ "viewport": "mobile" }` (`desktop` or `mobile`) | AI vision on screenshot | Must |
 | `speed_score` | website | `{ "min": 80 }` | PageSpeed Insights API | Should |
 | `interaction` | website | `{ "steps": "Paste a long link and click Shrink It", "viewport": "desktop" }` (`viewport`: `desktop` or `mobile`; steps ≤ 300 characters) | Playwright + AI: plans clicks/typing, does them, judges before/after screenshots | Added Nov 11 (section 13.1) |
-| `lighthouse_score` | website | `{ "category": "accessibility", "min": 90 }` (category: `accessibility`, `best-practices` or `seo`) | PageSpeed Insights API (Lighthouse) | Planned (section 13.2) |
+| `lighthouse_score` | website | `{ "category": "accessibility", "min": 90 }` (category: `accessibility`, `best-practices` or `seo`) | PageSpeed Insights API (Lighthouse) | Added Nov 11 (section 13.2) |
 
 **Rules:**
 - Use an exact check whenever possible. Use `visual` only for things like "looks good on mobile" or "matches the brand colors".
 - Every code job must include exactly one `tests_pass` item.
 - Weights are whole numbers and must add up to **100**. The route rejects the checklist otherwise.
+- **A weight is how much an item counts toward the score**, shown as "Score 85%" on the job page. It does **not** split the money: payouts are all or nothing (5.5). The app shows no dollar amount per item.
 - `mustTouch` / `mustNotTouch` paths: a path ending in `/` means "anything in that folder" (from the repo root). A path starting with `*` means "any file whose name ends with this", e.g. `*.test.js`.
 - **Test protection (added automatically to every code job):** a `files_changed` item "The buyer's tests and CI setup were not modified" with `mustNotTouch: [".github/", "test/", "tests/", "__tests__/", "spec/", "*.test.js", "*.spec.js", "*.test.ts", "*.spec.ts"]`. This stops a worker from editing the tests to make them pass. If the job itself asks to change tests (a `mustTouch` on a test path), those paths are left out. The buyer can still delete the item in the editor.
 - **`interaction` items** (details in 13.1):
@@ -273,13 +278,12 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 - Exact checks always return `confidence: 1.0`.
 - **If a checker crashes or times out, it returns `UNSURE` with the error in `reasoning`. It never throws an error up to the loop.**
 - **GitHub checks still running:** `checkCodeJob(job, { timedOut })` returns `null` if the PR's checks haven't finished (or haven't started). The loop puts the job back to `SUBMITTED` and tries again next round. After **5 minutes** of waiting, the loop calls it with `timedOut: true`, and still-running tests become `UNSURE`.
-- **Checkers don't use the database.** `checkWebsiteJob(job)` returns `{ results, screenshots: { desktop, mobile } }` (JPEG buffers). `loop.js` saves the screenshots as `Screenshot` documents and puts their ids in `evidence.screenshots`.
+- **Checkers don't use the database.** `checkWebsiteJob(job)` returns `{ results, screenshots: { desktop, mobile }, interactions }` (JPEG buffers; `interactions` is one `{ result, shot }` per `interaction` item). `loop.js` saves the screenshots as `Screenshot` documents and puts their ids in `evidence.screenshots`.
 
 ### 5.5 Decision rule (`server/src/decision.js`, owned by B)
 B's loop runs this after all items are checked, then acts on the result.
 
-```
-All or nothing: the worker is paid only when every item passes. There are no partial payouts.
+**All or nothing:** the worker is paid only when every item passes. There are no partial payouts.
 
 ```
 1. a files_changed item FAILED because a restricted file was changed (cheating) → settleJob(job, 0) → VOID, on any try, no resubmit
@@ -291,6 +295,8 @@ All or nothing: the worker is paid only when every item passes. There are no par
 - `job.attempts` goes up by 1 each time the worker submits (`POST /api/jobs/:id/submit`), not when checking starts, so a server restart can't use up a try.
 - Example: $200 job. On the 1st try one item fails → `CHANGES_REQUESTED`. On the 2nd try it still fails → $0, the hold is voided and the buyer keeps everything.
 - Example: the PR changes `test/` when the checklist says it must not → voided at once, even on the 1st try.
+- **Human review** (`NEEDS_REVIEW`) follows the same rule: the review box marks each unsure item Pass or Fail, then sends `payoutAmount` = the full amount (all Pass) or 0 (any Fail).
+- After the hackathon we plan a **hybrid** rule ("required" items gate the payment, "work" items are paid by weight): section 14.
 
 ### 5.6 Shared functions (how A's and B's code connect)
 | Function | File | Owner | Called by | What it does |
@@ -319,7 +325,7 @@ A "job object" means the full `Job` document including `items`.
 | `POST` | `/api/paypal/orders` | `{ jobId }` | `{ orderId }` | `CHECKLIST_READY` |
 | `POST` | `/api/paypal/orders/:orderId/authorize` | `{ jobId }` | job object, status `FUNDED` | `CHECKLIST_READY` |
 | `POST` | `/api/jobs/:id/submit` | `{ submissionUrl }` | job object, status `SUBMITTED`, all items reset to `PENDING` | `FUNDED` or `CHANGES_REQUESTED` |
-| `POST` | `/api/jobs/:id/review` | `{ payoutAmount }` (0 to job amount) | job object, status `SETTLED` | `NEEDS_REVIEW` |
+| `POST` | `/api/jobs/:id/review` | `{ payoutAmount }` (0 to job amount; the app sends only 0 or the full amount, see 5.5) | job object, status `SETTLED` | `NEEDS_REVIEW` |
 | `GET` | `/api/jobs` | none | `[job object, ...]` newest first | any |
 | `GET` | `/api/jobs/:id` | none | `{ job, events: [...] }` | any |
 | `GET` | `/api/events` | none | `[event, ...]` newest first, each with `jobTitle` added | any |
@@ -344,7 +350,7 @@ A "job object" means the full `Job` document including `items`.
    ... worker submits, checks run, decision ...
 6. settleJob(job, amount):
      amount > 0  → POST /v2/payments/authorizations/{authId}/capture
-                   { amount: { currency_code, value: "140.00" }, final_capture: true }
+                   { amount: { currency_code, value: "200.00" }, final_capture: true }   (the full amount: payouts are all or nothing, 5.5)
      amount == 0 → POST /v2/payments/authorizations/{authId}/void
 ```
 ⚠️ An authorization is safe to capture for **about 3 days** (honor period). Keep demo jobs short.
@@ -504,7 +510,7 @@ Fill in names:
 - Set up the repo (`client/` + `server/`), Express, MongoDB Atlas, all 3 Mongoose models. **Do this first, day 1 morning, and push it so B and C can start.**
 - `events.js` (`logEvent`) and a placeholder `settleJob` on day 1
 - PayPal Sandbox: app keys, test accounts, access-token helper
-- Create order / authorize / capture (full and partial) / void, all tested
+- Create order / authorize / capture / void, all tested (the rule now only captures the full amount; a partial capture still works if the review route is ever sent one)
 - All routes in 5.8, including input checks, the "allowed when status is" rule, and CORS for the React app
 - Call `startCheckerLoop()` from `index.js`
 - Deploy to Render: Static Site (client) + Web Service (server, Docker with Playwright)
@@ -526,13 +532,13 @@ Fill in names:
 - React routes:
   1. `/`: landing page with one-line pitch + "Create a job"
   2. `/jobs/new`: title, description, type, amount, worker email (+ repo URL for code jobs) → "Generate checklist" → edit items (text, weight) with a "weights must add up to 100" check → "Approve" → **PayPal button**
-  3. `/jobs/:id/submit`: worker pastes PR or website URL. Also used for the resubmit when status is `CHANGES_REQUESTED`.
-  4. `/jobs/:id`: **live status** (poll `GET /api/jobs/:id` every 2s): each item turning green/red/grey, reasoning, screenshots, attempts, final payout. When status is `NEEDS_REVIEW`, show a **review box** (payout amount input + "Settle" button → `POST /review`).
+  3. `/jobs/:id/submit`: worker pastes PR or website URL. Also used for the resubmit when status is `CHANGES_REQUESTED`. **The only page where work is submitted.**
+  4. `/jobs/:id`: **live status** (poll `GET /api/jobs/:id` every 2s): each item turning green/red/grey, reasoning, screenshots, attempts, final payout. Results that land together are shown about 1 second apart. While the job waits for work, it shows the **worker link** (Copy / Open submit page), not a submit box. When status is `NEEDS_REVIEW`, show a **review box**: Pass or Fail for each unsure item, then "Settle on PayPal" → `POST /review` with the full amount (all Pass) or 0 (any Fail).
   5. `/dashboard`: **AG Grid** with 3 grids: jobs (`GET /api/jobs`), checklist results (items from all jobs, one row per item), audit log (`GET /api/events`)
 - Use fake data matching section 5 until A's API is ready
 - **Demo material** (start by day 3), exactly as described in **10.1**:
   - The demo GitHub repo: a small shop checkout where the worker adds coupon codes, 6 buyer tests (each its own GitHub Actions job), and 3 PRs: `attempt-1`, `fix` and `cheat`
-  - The demo website: a good and a broken version of one landing page, hosted on Render Static Site or GitHub Pages
+  - The demo website: a good and a broken version of one landing page, hosted on GitHub Pages (live, 10.1)
 - Demo video, Devpost write-up, screenshots, and the architecture image
 
 ---
@@ -612,7 +618,8 @@ veriflow/
 ├─ client/                         # React + Vite                         (C)
 │  ├─ src/
 │  │  ├─ pages/                    # Landing, NewJob, Submit, JobStatus, Dashboard
-│  │  ├─ components/               # PayPalButton, ChecklistEditor, ChecklistView, ReviewBox, grids/
+│  │  ├─ components/               # ui.jsx (design pieces), PayPalButton, ChecklistEditor, ChecklistView,
+│  │  │                            # ReviewBox, SubmitBox, WakeNotice, grids/ (AG Grid: VfGrid + 3 grids)
 │  │  └─ api.js                    # one function per endpoint in 5.8
 │  └─ .env
 ├─ server/
@@ -621,15 +628,17 @@ veriflow/
 │  │  ├─ events.js                 # logEvent()                             (A)
 │  │  ├─ auth.js                   # keys + auth middleware (5.10)          (A)
 │  │  ├─ models/                   # Job.js, Event.js, Screenshot.js        (A)
-│  │  ├─ routes/                   # jobs.js, paypal.js, screenshots.js     (A)
+│  │  ├─ validate.js               # input checks, isPrivateHost            (A)
+│  │  ├─ routes/                   # jobs.js, paypal.js, events.js, screenshots.js (A)
 │  │  ├─ paypal/                   # client.js (token), orders.js, settle.js (A)
-│  │  ├─ ai/                       # index.js, gemini.js, groq.js, checklist.js, prompts.js (B)
-│  │  ├─ checkers/                 # github.js, website.js, visual.js, speed.js, loop.js    (B)
+│  │  ├─ ai/                       # index.js, gemini.js, groq.js, checklist.js, checklistRules.js, prompts.js (B)
+│  │  ├─ checkers/                 # github.js, website.js, interaction.js, visual.js, speed.js, loop.js (B)
 │  │  └─ decision.js               # rule 5.5                               (B)
 │  ├─ scripts/                     # small test scripts for each checker    (B)
 │  ├─ Dockerfile                   # Playwright image for Render            (A)
 │  └─ .env
 ├─ demo/                           # notes for demo repo + demo site        (C)
+├─ .github/workflows/keep-awake.yml # pings the Render API every 10 minutes (11)
 └─ PLAN.md
 ```
 **Each file has exactly one owner.** If you need a change in someone else's file, ask them or open a PR and tag them.
@@ -707,7 +716,7 @@ The buyer's 6 tests:
 |---|---|---|---|
 | 1 | **Problem** | 20s | "Online work has a trust problem. And soon AI agents will be hiring other AI agents with no human watching." |
 | 2 | **Create the job** | 30s | On **Create a job**: type Code, repo `https://github.com/3Bit-Crew/veriflow-demo`, amount **200** (the worker email is already filled in), and the description below. The AI writes the checklist: tests pass, "files changed" (must change `src/checkout.js`, must not change `src/payment/`), and the automatic test-protection item. Approve, pay with PayPal → **"$200.00 is held on PayPal."** |
-| 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Rounds to cents, Shipping not discounted"** → **"Changes requested. $200.00 is still held."** |
+| 3 | **First try** | 35s | The worker submits the `attempt-1` PR. Items turn red: **"2 of 6 check(s) failed: Shipping not discounted, Rounds to cents"** (the order of the two names can vary) → **"Changes requested. $200.00 is still held."** |
 | 4 | **Second try** | 35s | The worker submits the `fix` PR. Items turn green one by one → **"$200.00 released to the worker via PayPal."** |
 | 5 | **Caught and flagged** | 30s | Open the pre-run **cheat** job: the tests "pass", but "The buyer's tests and CI setup were not modified" is red. Then the pre-run **website** job: the AI flags the cut-off button on the mobile screenshot. The worker resubmitted without fixing it, so the worker gets **nothing** and the whole hold goes back to the buyer: every item must pass. The cheat job was voided the same way, on its first try. |
 | 6 | **Dashboard** | 20s | AG Grid: every job, every check result and every PayPal action, all auditable. |
@@ -722,12 +731,12 @@ The buyer's 6 tests:
 
 | Risk | Backup |
 |---|---|
-| PayPal partial capture or payee setup gives errors | Test it in Postman on day 1. If payee fails, capture to our sandbox business account and **show** the split in the UI. |
+| PayPal capture, void or payee setup gives errors | Test it in Postman on day 1. If payee fails, capture to our sandbox business account. A void only works when the worker is that account (10.1), so the New job form fills it in. |
 | AI gives wrong results or invalid JSON | Use exact checks for most items. Validate JSON, retry once, else `UNSURE` → `NEEDS_REVIEW`. Pick demo cases that are clearly pass or fail. |
 | Free AI limit hit during testing or demo | Cache AI responses in MongoDB. Separate dev keys per person. Switch `AI_PROVIDER` to Groq for text. |
 | Playwright doesn't run on Render | Use a Dockerfile based on the official Playwright image (`mcr.microsoft.com/playwright`). If still stuck by day 4, run the server on a laptop for the demo. |
 | Render free plan runs out of memory with Playwright | One job at a time, close the browser after each job, small viewports, JPEG screenshots. |
-| Render free server "sleeps" after ~15 min idle (first request takes ~1 min), and the checker loop pauses while asleep | Open the site a few minutes before recording or judging. |
+| Render free server "sleeps" after ~15 min idle (first request takes ~1 min), and the checker loop pauses while asleep | `.github/workflows/keep-awake.yml` pings `/api/health` every 10 minutes from `main` (GitHub can delay scheduled runs, so it isn't guaranteed). Still open the site a few minutes before recording or judging. The app shows "Waking up the server…" if a request takes over 5 seconds. |
 | Server restarts in the middle of a check | Every minute the loop puts jobs stuck in `CHECKING` for over 10 minutes back to `SUBMITTED` (5.6). Only old ones, so during a Render deploy the new server doesn't re-check the job the old server is still finishing. That 10-minute wait would ruin a take, so nobody pushes to `main` while someone is recording (8.5). |
 | GitHub Actions slow during the demo | Keep the test suite tiny (finishes in under 30s). Open the demo PRs before recording so the results already exist (10.2). Pre-record that part of the video if needed. |
 | Running out of time | Cut in this order: speed check → Agent API → website job → keep the code job only. **Don't cut resubmit**, the demo needs it. |
@@ -752,13 +761,13 @@ The buyer's 6 tests:
 **Submission target: Nov 12, ~10 pm IST.** Devpost closes Nov 12, 12:00 PM Pacific (about 1:30 am IST on Nov 13), so 10 pm leaves a buffer.
 **Code freeze: Nov 12, 4 pm IST.** After that, only fixes for bugs found while recording the video.
 
-Three pieces of work, in this order. Don't start the next one until the one before it works on Render.
+Three pieces of work, in this order. All three are done and merged.
 
 | # | Work | Owner(s) | Status |
 |---|---|---|---|
-| 13.1 | Interaction checks (AI clicks and types on the site) | M, K, H | K done; M on branch `b/interaction-check`; H done (PR #16) |
-| 13.3 | PageSpeed API key | K | To do (blocks 13.2) |
-| 13.2 | Lighthouse scores (accessibility, best practices, SEO) | M, K, H | K done; H done; M to do |
+| 13.1 | Interaction checks (AI clicks and types on the site) | M, K, H | Done: K; M (PR #14); H (PR #16) |
+| 13.3 | PageSpeed API key | K | Done: set on Render and tested |
+| 13.2 | Lighthouse scores (accessibility, best practices, SEO) | M, K, H | Done: K; M (PR #23); H |
 
 ### 13.1 Interaction checks
 
@@ -777,7 +786,7 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 **Tasks:**
 - [x] **K:** `validate.js` accepts `interaction` (steps ≤ 300 characters, viewport desktop/mobile, max 2 per checklist); `isPrivateHost` exported.
 - [x] **M:** checker (`checkers/interaction.js`), wired into `website.js` and `loop.js`, checklist rules and prompts, `scripts/test-interaction.js`. Tested: ShrinkThis QR → PASS, wrong expectation → FAIL, impossible steps → UNSURE.
-- [ ] **M:** push branch `b/interaction-check` and open a pull request. One retry when Gemini times out while judging.
+- [x] **M:** push branch `b/interaction-check` and open a pull request (merged as #14). One retry when Gemini times out while judging.
 - [x] **K:** add `INTERACTION_CHECKS=true` to `render.yaml` and `server/.env.example`. Set it on Render (already added in the dashboard).
 - [x] **H:** `checklistKinds.js`: label `interaction: 'Interaction (AI)'`, `describeParams` → "AI will, on desktop: …" or "AI will, on mobile: …" followed by the steps (the viewport was added). `fakeApi.js`: `interaction` added to the website kinds, with a fake result and screenshot, and the same max-2 rule as the server. In PR #16.
 - [ ] **All:** after merge, run one real website job on Render with an interaction item and watch the Render logs for memory errors.
@@ -796,25 +805,25 @@ Three pieces of work, in this order. Don't start the next one until the one befo
 - The AI uses it only when the description asks for it ("accessible", "SEO-friendly", "follows best practices"), at most one item per category.
 
 **Tasks:**
-- [ ] **M:** `checkers/speed.js` reads all needed categories from one call and returns results for `speed_score` and `lighthouse_score` items. Add the kind to `ai/checklistRules.js` (`cleanParams`: category from the list, `min` 0–100, default 90) and the prompt. Test script run on 2 sites. **~45 min**
+- [x] **M:** (merged as #23) `checkers/speed.js` reads all needed categories from one call and returns results for `speed_score` and `lighthouse_score` items. Add the kind to `ai/checklistRules.js` (`cleanParams`: category from the list, `min` 0–100, default 90) and the prompt. Test script run on 2 sites. **~45 min**
 - [x] **K:** `validate.js`: `lighthouse_score: (p) => ['accessibility','best-practices','seo'].includes(p.category) && Number.isFinite(p.min) && p.min >= 0 && p.min <= 100`. **~10 min**
 - [x] **H:** `checklistKinds.js`: label `lighthouse_score: 'Lighthouse score'`, `describeParams` → `` `Lighthouse ${params.category} score of at least ${params.min}` ``. `fakeApi.js`: add the kind. **~10 min** Done: harmless if M's part never lands, since the AI then never writes the item.
-- [ ] **All:** move the 5.3 row from "Planned" to done.
+- [x] **All:** move the 5.3 row from "Planned" to done.
 
 **Deploy order:** K's rule must be live **before or together with** M's change. Otherwise the AI writes `lighthouse_score` items that the approve route rejects, and buyers can't approve website checklists. Merge K's PR first, or put both in one PR.
 
-**Start only after 13.1 works on Render and 13.3 is done. Skip it if that isn't true by Nov 12, 12 pm IST.**
+**Done on Nov 11** (it was to start only after 13.1 worked on Render and 13.3 was done). The AI adds Lighthouse items only when the description asks for accessibility, SEO or best practices, so the demo jobs are unaffected.
 
 ### 13.3 PageSpeed API key (owner: K)
 
 **Why:** without a key, PageSpeed uses a quota shared by everyone on the internet, and it's already used up (tested Nov 11: "Quota exceeded" every time). Every speed check then comes back UNSURE, so **every website job with a speed item goes to human review** instead of paying out.
 
-**Tasks (K, ~10 min):**
-- [ ] console.cloud.google.com → create or pick a project → enable **PageSpeed Insights API**.
-- [ ] APIs & Services → Credentials → **Create credentials → API key**. Restrict it to the PageSpeed Insights API.
-- [ ] Render → veriflow-api → Environment: `PAGESPEED_API_KEY` = the key. Save, rebuild, and deploy (when nobody is testing).
-- [ ] Share the key privately with M and H for their local `server/.env`. **Never commit it.**
-- [ ] Check: run a website job with a speed item, or `node scripts/test-website.js` locally with the key; the speed item should show a real score.
+**Tasks (K, ~10 min):** all done on Nov 11. One PageSpeed call returns all 4 scores in about 12 seconds.
+- [x] console.cloud.google.com → create or pick a project → enable **PageSpeed Insights API**.
+- [x] APIs & Services → Credentials → **Create credentials → API key**. Restrict it to the PageSpeed Insights API.
+- [x] Render → veriflow-api → Environment: `PAGESPEED_API_KEY` = the key. Save, rebuild, and deploy (when nobody is testing).
+- [x] Share the key privately with M and H for their local `server/.env`. **Never commit it.**
+- [x] Check: run a website job with a speed item, or `node scripts/test-website.js` locally with the key; the speed item should show a real score.
 
 Free limit: about 25,000 checks a day.
 
@@ -824,5 +833,51 @@ Free limit: about 25,000 checks a day.
 |---|---|---|---|
 | `INTERACTION_CHECKS` | `true` | M | Added |
 | `PAYPAL_WORKER_EMAIL` | Sandbox business account that owns the PayPal app | K | Check it's set |
-| `PAGESPEED_API_KEY` | Key from 13.3 | K | To do |
+| `PAGESPEED_API_KEY` | Key from 13.3 | K | Set |
+| `GITHUB_TOKEN` | Read-only token (raises the GitHub API limit from 60 to 5,000 requests an hour) | K | Set |
 | `CHECKER_LOOP` | `true` (laptops: `false`) | K | Set |
+
+---
+
+## 14. Future scope (after the hackathon): a hybrid payout rule
+
+**Status:** idea only. **Not building it before the hackathon:** it changes the payout rule, the checklist format, the AI prompts and the UI, and it needs a lot of testing. In the pitch and Devpost, mention it as what's next.
+
+### Why we moved away from weights
+We started with partial payouts: each checklist item had a weight, and the worker was paid for the weight of the items that passed. Then we found a way to cheat it. Take this checklist for a $40 job:
+
+| Item | Weight |
+|---|---|
+| 1. Don't change files outside your job | $20 |
+| 2. Fix bug A | $20 |
+
+A worker can open a pull request with an **empty commit**. It changes no files, so item 1 passes and they cash out $20 without doing any work. That's why we switched to **all or nothing** (5.5): every item must pass, or nothing is paid.
+
+### Why all or nothing isn't enough either
+It protects the buyer, but not the worker. A **malicious buyer** can add a check that can never pass, for example a GitHub Actions test that fails if anything in the repo changes. The worker does the job, fails that check every time, and is never paid, even though they did the work.
+
+### The proposal: two kinds of checklist items
+(The names are placeholders and can change.)
+
+| Kind | What it is | Examples |
+|---|---|---|
+| **"Required"** | Basic conditions any honest submission meets | Don't change files outside `src/checkout.js`; don't edit the buyer's tests |
+| **"Work"** | The actual job being paid for | Fix bug A; SAVE10 takes 10% off; the page looks good on mobile |
+
+**The rule:**
+1. If **any "required" item fails**, the worker gets **nothing**, whatever the other results are.
+2. If **all "required" items pass**, the worker is paid by **how much of the "work" passed**, using the "work" items' weights, as in the old partial system.
+
+**The same example under the hybrid rule:** "don't change other files" is required and "fix bug A" is work. The empty commit passes the required item but does no work, so it earns **$0**. A real fix passes both and earns the full amount.
+
+### What it would touch
+- **Checklist format (5.2, 5.3):** a new field on each item, for example `group: "required" | "work"`, with weights that add up to 100 across the "work" items.
+- **AI checklist prompt:** label each item as required or work. The automatic test-protection item would always be required.
+- **Payout rule (5.5):** the two steps above, plus the cheating rule.
+- **UI:** the editor shows the two groups, the job page shows "required: all passed" next to the work score, and the review box goes back to paying a share.
+- **Tests:** every combination of required and work results, on the first and second try.
+
+### Open questions to settle before building it
+- **The malicious-buyer problem can move into "required".** A buyer could put the impossible check in the required group. Who decides what may be required? Options: only a fixed list of required kinds (file rules, test protection), the worker accepting the checklist before starting, or a human review when a required item looks impossible.
+- **First try and resubmit:** does a failed "work" item on the first try still give the worker one more try, as now?
+- **Is there a minimum?** For example, no payout below a set share of the work.

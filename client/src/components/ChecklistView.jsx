@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { screenshotUrl } from '../api.js';
 import { describeParams, KIND_ICONS, KIND_LABELS } from '../checklistKinds.js';
-import { formatMoney } from '../format.js';
 import { Icon, ResultIcon, ResultPill, resultOf } from './ui.jsx';
 
 const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
@@ -53,7 +52,7 @@ function Evidence({ item }) {
   );
 }
 
-function Item({ item, amount, currency, open, onToggle }) {
+function Item({ item, open, onToggle }) {
   const r = resultOf(item.status);
   const hasEvidence = isResult(item.status);
   const header = (
@@ -69,9 +68,9 @@ function Item({ item, amount, currency, open, onToggle }) {
         </span>
       </span>
       <ResultPill status={item.status} />
-      <span className="it__v">
-        {formatMoney((amount * item.weight) / 100, currency)}
-        <small>{item.weight}%</small>
+      <span className="it__v" title="How much this item counts toward the score. Payment is all or nothing.">
+        {item.weight}%
+        <small>weight</small>
       </span>
       <span className="it__chev" style={{ opacity: hasEvidence ? 1 : 0 }}>
         <Icon name="chev" size={14} />
@@ -125,8 +124,6 @@ export default function ChecklistView({ job }) {
         <Item
           key={item._id || i}
           item={item}
-          amount={job.amount}
-          currency={job.currency}
           open={open.has(i)}
           onToggle={() => toggle(i)}
         />

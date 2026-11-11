@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { createJob, generateChecklist, getJob } from '../api.js';
-import ChecklistEditor, { CompositionBar } from '../components/ChecklistEditor.jsx';
+import ChecklistEditor, { CompositionBar, WEIGHT_HELP } from '../components/ChecklistEditor.jsx';
 import PayPalButton from '../components/PayPalButton.jsx';
 import { Icon } from '../components/ui.jsx';
 import { formatMoney } from '../format.js';
@@ -152,7 +152,7 @@ export default function NewJob() {
               <div className="form__head">
                 <div>
                   <h2>Review the checklist</h2>
-                  <p className="muted">Each item is checked automatically. Its weight is its share of the payment if the work only partly passes.</p>
+                  <p className="muted">Each item is checked automatically. {WEIGHT_HELP}</p>
                 </div>
               </div>
               {generating ? (
@@ -253,6 +253,8 @@ function Receipt({ job, values, items, ready }) {
           <span>{list.length ? `${list.length} items · ${total}%` : '—'}</span>
         </div>
         <div className="receipt__line"><span>Retries</span><span>1 resubmit</span></div>
+        <div className="receipt__line"><span>Payout</span><span>All or nothing</span></div>
+        <div className="receipt__line"><span>Protected files</span><span>Changed = voided</span></div>
         <div className="receipt__line"><span>Human review</span><span>if confidence &lt; 70%</span></div>
       </div>
     </aside>
@@ -264,7 +266,7 @@ function HoldStep({ job, onAuthorized }) {
   const timeline = [
     ['Now', `PayPal authorizes ${amount} from your account`, 'lock'],
     ['When work is submitted', 'Each checklist item is checked against evidence', 'eye'],
-    ['After the checks', 'PayPal captures what passed. The rest of the hold is released to you.', 'shield'],
+    ['After the checks', 'If every item passes, PayPal pays the worker. Otherwise the whole hold is released back to you.', 'shield'],
   ];
   return (
     <div className="card form fade">

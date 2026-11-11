@@ -86,7 +86,7 @@ export default function Submit() {
               {canSubmit
                 ? isRetry
                   ? "Your first try didn't pass every check"
-                  : "You're paid for each item your work passes"
+                  : "You're paid when every item passes"
                 : notFunded
                   ? "This job isn't funded yet"
                   : 'This work has been submitted'}
@@ -94,8 +94,8 @@ export default function Submit() {
             <p className="muted">
               {canSubmit
                 ? isRetry
-                  ? 'Fix the items marked below, then submit again. This is your last try: anything still failing isn\'t paid.'
-                  : 'Every checklist item below is checked automatically. Each one is worth its share of the payment.'
+                  ? 'Fix the items marked below, then submit again. This is your last try: if anything still fails, nothing is paid.'
+                  : "Every checklist item below is checked automatically, and every one must pass to be paid. Changing a protected file (like the buyer's tests) cancels the job at once."
                 : notFunded
                   ? 'You can submit once the buyer has approved the checklist and held the payment.'
                   : 'Follow the checks and the payout on the job page.'}

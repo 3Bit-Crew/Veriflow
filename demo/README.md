@@ -19,7 +19,7 @@ Keep these open. Don't merge them.
 |---|---|---|---|---|
 | [#1](https://github.com/3Bit-Crew/veriflow-demo/pull/1) | `attempt-1` | Adds coupons, but the 10% also comes off the shipping, and totals aren't rounded to the cent | 4 of 6 pass. Failing: **Shipping not discounted**, **Rounds to cents** | First try: **Changes requested**, money still held |
 | [#2](https://github.com/3Bit-Crew/veriflow-demo/pull/2) | `fix` | Everything right | 6 of 6 pass | Second try: **paid in full** |
-| [#3](https://github.com/3Bit-Crew/veriflow-demo/pull/3) | `cheat` | `attempt-1`'s code, plus the tests weakened so they "pass" | 6 of 6 "pass" | The automatic test-protection item fails (PLAN.md 5.3), so it's caught. Use a **separate job** for this one (a job only allows 2 tries) |
+| [#3](https://github.com/3Bit-Crew/veriflow-demo/pull/3) | `cheat` | `attempt-1`'s code, plus the tests weakened so they "pass" | 6 of 6 "pass" | The automatic test-protection item fails (PLAN.md 5.3), so it's **caught and blocked: voided at once, $0 to the worker**, even on the first try (PLAN.md 5.5). Use a **separate job** for this one, because it ends the job |
 
 `attempt-1` and `fix` change only `src/checkout.js`. `cheat` also changes `tests/checkout.test.js`.
 
@@ -60,6 +60,8 @@ What each check finds on both versions:
 - typing an email and clicking "Sign up" shows "Thank you, you're on the list!" in place of the form, without loading a new page (for the AI interaction check)
 - **only on `broken/`, on a phone**: the button is cut off, which the AI's mobile screenshot check should flag
 
-**Pre-run for the video (PLAN.md 10.2):** submit the broken URL. The first try ends in "Changes requested". Then submit the broken URL again: the second try ends in a partial payout. Submitting the good URL as the second try instead pays in full.
+**Pre-run for the video (PLAN.md 10.2):** submit the broken URL. The first try ends in "Changes requested". Then submit the broken URL again: payouts are all or nothing (PLAN.md 5.5), so the second try ends **voided: $0 to the worker**, and the whole hold goes back to the buyer. Submitting the good URL as the second try instead pays in full.
 
-Checked on Nov 11 in a real browser at the checker's screen sizes (1280×800 and 390×844): every item above behaves as described.
+The worker must be our own sandbox business account (`sb-m8uku53787938@business.example.com`, filled in on the New job form), or PayPal refuses the void and the job goes to human review.
+
+Checked on Nov 11 in a real browser at the checker's screen sizes (1280×800 and 390×844), and with the team's real checkers and AI: on `broken/` the AI flags the cut-off button on mobile (95% sure) and every other item passes; on `good/` all 6 items pass.

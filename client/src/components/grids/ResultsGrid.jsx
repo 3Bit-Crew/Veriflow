@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { KIND_LABELS } from '../../checklistKinds.js';
-import { formatMoney } from '../../format.js';
 import { ResultPill, resultOf } from '../ui.jsx';
-import { moneyText, tip } from './gridSetup.js';
+import { tip } from './gridSetup.js';
 import VfGrid from './VfGrid.jsx';
 
 // Every checklist item from every job, one row each, with its latest result.
@@ -15,9 +14,7 @@ export function resultRows(jobs) {
       jobTitle: job.title,
       text: item.text,
       kind: item.kind,
-      weight: item.weight,
-      worth: (job.amount * item.weight) / 100,
-      currency: job.currency,
+      weight: item.weight, // importance toward the score; payouts are all or nothing (PLAN.md 5.5)
       status: item.status || 'PENDING',
       confidence: typeof item.confidence === 'number' ? item.confidence : null,
       reasoning: item.reasoning || '',
@@ -26,7 +23,7 @@ export function resultRows(jobs) {
   );
 }
 
-const HIDE_BELOW = { kind: 700, weight: 860, worth: 600, confidence: 960, reasoning: 1100 };
+const HIDE_BELOW = { kind: 700, weight: 600, confidence: 960, reasoning: 1100 };
 
 export default function ResultsGrid({ jobs, search, filter, onApi, onDisplayedCount }) {
   const rows = useMemo(() => (jobs ? resultRows(jobs) : null), [jobs]);
@@ -71,14 +68,6 @@ export default function ResultsGrid({ jobs, search, filter, onApi, onDisplayedCo
         type: 'rightAligned',
         valueFormatter: (p) => `${p.value}%`,
         cellRenderer: (p) => <span className="cell-num">{p.value}%</span>,
-      },
-      {
-        field: 'worth',
-        headerName: 'Worth',
-        width: 110,
-        type: 'rightAligned',
-        valueFormatter: (p) => moneyText(p.value),
-        cellRenderer: (p) => <span className="cell-num">{formatMoney(p.value, p.data.currency)}</span>,
       },
       {
         field: 'confidence',
