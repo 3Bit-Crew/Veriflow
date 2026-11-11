@@ -5,6 +5,10 @@ import { formatMoney } from '../format.js';
 
 const CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
+// PayPal draws these buttons itself; this matches them to the design (48px, rounded, stacked).
+// (No `tagline`: PayPal rejects it for the vertical layout.)
+const BUTTON_STYLE = { layout: 'vertical', shape: 'rect', borderRadius: 12, height: 48, label: 'pay' };
+
 // Holds the job's payment on PayPal (PLAN.md 5.9). intent "authorize" means the buyer
 // approves now and is only charged later, when settleJob captures the money.
 // Calls onAuthorized(job) with the FUNDED job once the hold is in place.
@@ -33,13 +37,17 @@ export default function PayPalButton({ job, onAuthorized }) {
       }
     }
     return (
-      <div className="stack">
-        <button type="button" className="button button--primary" onClick={simulate} disabled={confirming}>
-          {confirming ? 'Holding payment…' : `Simulate PayPal approval of ${formatMoney(job.amount, job.currency)}`}
+      <>
+        <button type="button" className="pp" onClick={simulate} disabled={confirming}>
+          {confirming ? (
+            <><span className="spin" style={{ borderTopColor: '#003087' }} />Holding payment…</>
+          ) : (
+            <>Simulate <span><b>Pay</b><i>Pal</i></span> approval of {formatMoney(job.amount, job.currency)}</>
+          )}
         </button>
-        <p className="muted small">Sample data mode: no PayPal window opens.</p>
+        <p className="hint" style={{ textAlign: 'center', marginTop: 0 }}>Sample data mode: no PayPal window opens.</p>
         {error && <p className="form-error" role="alert">{error}</p>}
-      </div>
+      </>
     );
   }
 
@@ -52,11 +60,11 @@ export default function PayPalButton({ job, onAuthorized }) {
   }
 
   return (
-    <div className="stack">
+    <>
       <div className="paypal-slot" aria-busy={confirming}>
         <PayPalScriptProvider options={{ clientId: CLIENT_ID, intent: 'authorize', currency: job.currency || 'USD' }}>
           <PayPalButtons
-            style={{ layout: 'vertical', label: 'pay' }}
+            style={BUTTON_STYLE}
             createOrder={async () => {
               setError(null);
               try {
@@ -73,8 +81,8 @@ export default function PayPalButton({ job, onAuthorized }) {
           />
         </PayPalScriptProvider>
       </div>
-      {confirming && <p className="muted" aria-live="polite">Confirming the hold with PayPal…</p>}
+      {confirming && <p className="loading-line" aria-live="polite"><span className="spin" />Confirming the hold with PayPal…</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-    </div>
+    </>
   );
 }

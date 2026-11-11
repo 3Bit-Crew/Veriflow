@@ -9,7 +9,7 @@ export default function WakeNotice() {
 
   return (
     <div className="wake-notice" role="status">
-      <span className="spinner spinner--small" aria-hidden="true" />
+      <span className="spin spin--dark" aria-hidden="true" />
       <p>
         <strong>Waking up the server…</strong> It sleeps when nobody is using it, so the first load can take up to a
         minute.

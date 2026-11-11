@@ -1,38 +1,37 @@
 import { useState } from 'react';
 import { reviewJob } from '../api.js';
 import { formatMoney } from '../format.js';
+import { HoldBar } from './ui.jsx';
 
 // Same rounding the server uses (roundDown2 in server/src/paypal/settle.js).
 const roundDown2 = (n) => Math.floor(n * 100 + 1e-9) / 100;
+const CONFIDENCE_THRESHOLD = 0.7; // PLAN.md 5.5
+const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
 
-// For NEEDS_REVIEW jobs: a person picks the payout (0 to the job amount) and settles it
-// with POST /api/jobs/:id/review. Paying out can't be undone, so it takes a confirm step.
+// An item a person has to decide: unsure, checked with low confidence, or never checked
+// (the check stopped partway). Everything else keeps its result.
+export const needsDecision = (item) =>
+  item.status === 'UNSURE' || !isResult(item.status) || !(Number(item.confidence) >= CONFIDENCE_THRESHOLD);
+
+// For NEEDS_REVIEW jobs: the reviewer marks each undecided item Pass or Fail, the payout is
+// the weight of everything that passed, and POST /api/jobs/:id/review settles it on PayPal.
+// Paying out can't be undone, so it takes a confirm click.
 export default function ReviewBox({ job, onSettled }) {
   const money = (n) => formatMoney(n, job.currency);
-  const passedWeight = job.items.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
-  const forPassed = roundDown2((job.amount * passedWeight) / 100);
-
-  const [value, setValue] = useState(String(forPassed));
+  const open = job.items.map((item, index) => ({ item, index })).filter(({ item }) => needsDecision(item));
+  const [decisions, setDecisions] = useState({});
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const text = value.trim();
-  const payout = Number(text);
-  let problem = null;
-  if (text === '') problem = 'Enter an amount.';
-  else if (!/^\d+(\.\d{1,2})?$/.test(text)) problem = 'Use dollars and cents, like 120 or 120.50.';
-  else if (payout > job.amount) problem = `The most you can pay is ${money(job.amount)}.`;
-  const returned = problem ? 0 : Math.round((job.amount - payout) * 100) / 100;
+  const resolved = job.items.map((item, i) => (needsDecision(item) ? { ...item, status: decisions[i] || 'UNSURE' } : item));
+  const passedWeight = resolved.filter((item) => item.status === 'PASS').reduce((sum, item) => sum + item.weight, 0);
+  const payout = roundDown2((job.amount * passedWeight) / 100);
+  const back = Math.round((job.amount - payout) * 100) / 100;
+  const ready = open.every(({ index }) => decisions[index]);
 
-  const presets = [
-    { label: `Passed items (${passedWeight}%)`, amount: forPassed },
-    { label: 'In full', amount: job.amount },
-    { label: 'Nothing', amount: 0 },
-  ];
-
-  function choose(next) {
-    setValue(String(next));
+  function decide(index, value) {
+    setDecisions((current) => ({ ...current, [index]: value }));
     setConfirming(false);
     setError(null);
   }
@@ -42,79 +41,88 @@ export default function ReviewBox({ job, onSettled }) {
     setError(null);
     try {
       await reviewJob(job._id, payout);
-      onSettled();
+      onSettled(payout);
     } catch (err) {
       setError(err.message);
       setSaving(false);
+      setConfirming(false);
     }
   }
 
   return (
-    <div className="review stack">
-      <div className="field">
-        <label htmlFor="payout">Pay the worker</label>
-        <div className="review__row">
-          <div className="input-prefix review__amount">
-            <span aria-hidden="true">$</span>
-            <input
-              id="payout"
-              className="input"
-              inputMode="decimal"
-              autoComplete="off"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                setConfirming(false);
-              }}
-              aria-invalid={problem ? 'true' : undefined}
-              aria-describedby="payout-hint"
-            />
-          </div>
-          <div className="preset-row" role="group" aria-label="Quick amounts">
-            {presets.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                className="button button--small"
-                aria-pressed={!problem && payout === preset.amount}
-                onClick={() => choose(preset.amount)}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p id="payout-hint" className={problem ? 'field__error' : 'field__hint tabular'}>
-          {problem || `Worker gets ${money(payout)} · Buyer gets back ${money(returned)}`}
-        </p>
+    <div className="review review-box">
+      <div className="review__head">
+        <span className="eyebrow">
+          Your decision{open.length > 0 ? ` · ${open.length} to decide` : ''}
+        </span>
+        <span className="eyebrow">Read the evidence below first</span>
       </div>
 
-      {error && <p className="form-error" role="alert">{error}</p>}
+      {open.length === 0 && (
+        <p className="muted" style={{ fontSize: 13, padding: '6px 0' }}>
+          Every item already has a confident result. Settling pays for the items that passed.
+        </p>
+      )}
 
-      {confirming ? (
-        <div className="confirm stack" role="alertdialog" aria-labelledby="confirm-text">
-          <p id="confirm-text">
-            {payout === 0
-              ? `Cancel the hold and return all ${money(job.amount)} to the buyer?`
-              : `Pay ${money(payout)} to the worker${returned > 0 ? ` and return ${money(returned)} to the buyer` : ''}?`}{' '}
-            This can't be undone.
-          </p>
-          <div className="actions">
-            <button type="button" className="button button--primary" onClick={settle} disabled={saving} autoFocus>
-              {saving ? 'Settling with PayPal…' : 'Confirm payout'}
+      {open.map(({ item, index }) => (
+        <div className="review__row" key={item._id || index}>
+          <span>
+            {item.text}
+            <span className="mono">{money((job.amount * item.weight) / 100)}</span>
+          </span>
+          <div className="tg" role="group" aria-label={`Decide: ${item.text}`}>
+            <button
+              type="button"
+              className={`p${decisions[index] === 'PASS' ? ' on' : ''}`}
+              aria-pressed={decisions[index] === 'PASS'}
+              onClick={() => decide(index, 'PASS')}
+            >
+              Pass
             </button>
-            <button type="button" className="button" onClick={() => setConfirming(false)} disabled={saving}>
-              Go back
+            <button
+              type="button"
+              className={`f${decisions[index] === 'FAIL' ? ' on' : ''}`}
+              aria-pressed={decisions[index] === 'FAIL'}
+              onClick={() => decide(index, 'FAIL')}
+            >
+              Fail
             </button>
           </div>
         </div>
-      ) : (
-        <div className="actions">
-          <button type="button" className="button button--primary" disabled={!!problem} onClick={() => setConfirming(true)}>
-            {problem ? 'Settle' : payout === 0 ? 'Settle: pay nothing' : `Settle: pay ${money(payout)}`}
+      ))}
+
+      <div style={{ marginTop: 14 }}>
+        <HoldBar items={resolved} dark height={8} />
+      </div>
+
+      <div className="review__foot">
+        <span style={{ fontSize: 13 }} aria-live="polite">
+          Worker gets <b className="mono review__payout">{money(payout)}</b>{' '}
+          <span className="muted">· {money(back)} back to buyer</span>
+        </span>
+        {confirming ? (
+          <div className="review__actions">
+            <button type="button" className="btn btn--sm btn--on-dark" onClick={() => setConfirming(false)} disabled={saving}>
+              Back
+            </button>
+            <button type="button" className="btn btn--lime btn--sm" onClick={settle} disabled={saving} autoFocus>
+              {saving ? <><span className="spin" />Settling…</> : payout === 0 ? 'Confirm: pay nothing' : `Confirm: pay ${money(payout)}`}
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="btn btn--lime btn--sm" disabled={!ready} onClick={() => setConfirming(true)}>
+            Settle on PayPal
           </button>
-        </div>
+        )}
+      </div>
+      {confirming && !saving && (
+        <p className="hint" role="alert">
+          {payout === 0
+            ? `This cancels the hold and returns all ${money(job.amount)} to the buyer. It can't be undone.`
+            : `PayPal pays ${money(payout)} to the worker${back > 0 ? ` and returns ${money(back)} to the buyer` : ''}. It can't be undone.`}
+        </p>
       )}
+      {error && <p className="form-error" role="alert">{error}</p>}
     </div>
   );
 }

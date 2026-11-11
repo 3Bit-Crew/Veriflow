@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
-import { AgGridReact } from 'ag-grid-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { KIND_LABELS } from '../../checklistKinds.js';
 import { formatMoney } from '../../format.js';
-import { gridProps } from './gridSetup.js';
-
-const RESULT_LABELS = { PASS: 'Passed', FAIL: 'Failed', UNSURE: 'Unsure', PENDING: 'Not checked' };
+import { ResultPill, resultOf } from '../ui.jsx';
+import { moneyText, tip } from './gridSetup.js';
+import VfGrid from './VfGrid.jsx';
 
 // Every checklist item from every job, one row each, with its latest result.
 export function resultRows(jobs) {
@@ -27,72 +26,102 @@ export function resultRows(jobs) {
   );
 }
 
-export default function ResultsGrid({ jobs, search }) {
-  const navigate = useNavigate();
+const HIDE_BELOW = { kind: 700, weight: 860, worth: 600, confidence: 960, reasoning: 1100 };
+
+export default function ResultsGrid({ jobs, search, filter, onApi, onDisplayedCount }) {
   const rows = useMemo(() => (jobs ? resultRows(jobs) : null), [jobs]);
 
-  const columnDefs = useMemo(() => [
-    {
-      field: 'jobTitle',
-      headerName: 'Job',
-      flex: 1,
-      minWidth: 180,
-      tooltipField: 'jobTitle',
-      cellRenderer: (p) => <Link to={`/jobs/${p.data.jobId}`}>{p.value}</Link>,
-    },
-    { field: 'text', headerName: 'Checklist item', flex: 2, minWidth: 220, tooltipField: 'text' },
-    {
-      field: 'kind',
-      headerName: 'Check',
-      width: 150,
-      valueFormatter: (p) => KIND_LABELS[p.value] || p.value,
-      filterValueGetter: (p) => KIND_LABELS[p.data.kind] || p.data.kind,
-    },
-    {
-      field: 'status',
-      headerName: 'Result',
-      width: 130,
-      cellRenderer: (p) => <span className={`pill pill--${p.value.toLowerCase()}`}>{RESULT_LABELS[p.value] || p.value}</span>,
-      filterValueGetter: (p) => RESULT_LABELS[p.data.status],
-      getQuickFilterText: (p) => RESULT_LABELS[p.value],
-    },
-    {
-      field: 'weight',
-      headerName: 'Weight',
-      width: 100,
-      type: 'rightAligned',
-      filter: 'agNumberColumnFilter',
-      valueFormatter: (p) => `${p.value}%`,
-    },
-    {
-      field: 'worth',
-      headerName: 'Worth',
-      width: 110,
-      type: 'rightAligned',
-      filter: 'agNumberColumnFilter',
-      valueFormatter: (p) => formatMoney(p.value, p.data.currency),
-    },
-    {
-      field: 'confidence',
-      headerName: 'Confidence',
-      width: 125,
-      type: 'rightAligned',
-      filter: 'agNumberColumnFilter',
-      valueFormatter: (p) => (p.value == null ? '—' : `${Math.round(p.value * 100)}%`),
-    },
-    { field: 'reasoning', headerName: 'Why', flex: 2, minWidth: 240, tooltipField: 'reasoning' },
-  ], []);
+  const columnDefs = useMemo(
+    () => [
+      {
+        field: 'text',
+        headerName: 'Checklist item',
+        flex: 2,
+        minWidth: 200,
+        tooltip: tip('text'),
+        cellRenderer: (p) => (
+          <div className="cell-stack">
+            <span className="t1">{p.value}</span>
+            <Link className="t2" to={`/jobs/${p.data.jobId}`} onClick={(e) => e.stopPropagation()}>{p.data.jobTitle}</Link>
+          </div>
+        ),
+        getQuickFilterText: (p) => `${p.value} ${p.data.jobTitle}`,
+      },
+      {
+        field: 'kind',
+        headerName: 'Check',
+        width: 170,
+        valueFormatter: (p) => KIND_LABELS[p.value] || p.value,
+        cellRenderer: (p) => <span className="tag">{p.valueFormatted}</span>,
+        getQuickFilterText: (p) => KIND_LABELS[p.value] || p.value,
+      },
+      {
+        field: 'status',
+        headerName: 'Result',
+        width: 130,
+        enableCellChangeFlash: true,
+        valueFormatter: (p) => resultOf(p.value).label,
+        cellRenderer: (p) => <ResultPill status={p.value} />,
+        getQuickFilterText: (p) => resultOf(p.value).label,
+      },
+      {
+        field: 'weight',
+        headerName: 'Weight',
+        width: 96,
+        type: 'rightAligned',
+        valueFormatter: (p) => `${p.value}%`,
+        cellRenderer: (p) => <span className="cell-num">{p.value}%</span>,
+      },
+      {
+        field: 'worth',
+        headerName: 'Worth',
+        width: 110,
+        type: 'rightAligned',
+        valueFormatter: (p) => moneyText(p.value),
+        cellRenderer: (p) => <span className="cell-num">{formatMoney(p.value, p.data.currency)}</span>,
+      },
+      {
+        field: 'confidence',
+        headerName: 'Confidence',
+        width: 150,
+        valueFormatter: (p) => (p.value == null ? '' : `${Math.round(p.value * 100)}%`),
+        cellRenderer: (p) => {
+          if (p.value == null) return <span className="muted">—</span>;
+          const pct = Math.round(p.value * 100);
+          return (
+            <div className="conf-cell">
+              <div className="conf__bar">
+                <i style={{ width: `${pct}%`, background: pct >= 70 ? 'var(--pass)' : 'var(--unsure)' }} />
+              </div>
+              <span className="mono">{pct}%</span>
+            </div>
+          );
+        },
+      },
+      {
+        field: 'reasoning',
+        headerName: 'Why',
+        flex: 2,
+        minWidth: 220,
+        tooltip: tip('reasoning'),
+        cellRenderer: (p) => <div className="why">{p.value || '—'}</div>,
+      },
+    ],
+    [],
+  );
 
   return (
-    <AgGridReact
-      {...gridProps}
-      rowData={rows ?? []}
-      loading={rows === null}
+    <VfGrid
+      rows={rows}
       columnDefs={columnDefs}
       getRowId={(p) => p.data.id}
-      quickFilterText={search}
-      onRowClicked={(e) => navigate(`/jobs/${e.data.jobId}`)}
-      overlayNoRowsTemplate="No checklist items yet."
+      getLink={(row) => `/jobs/${row.jobId}`}
+      search={search}
+      filter={filter}
+      hideBelow={HIDE_BELOW}
+      emptyText="No checklist items match. Try another search or filter."
+      onApi={onApi}
+      onDisplayedCount={onDisplayedCount}
     />
   );
 }

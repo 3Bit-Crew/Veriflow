@@ -1,83 +1,136 @@
+import { useEffect, useRef, useState } from 'react';
 import { screenshotUrl } from '../api.js';
-import { describeParams, KIND_LABELS } from '../checklistKinds.js';
+import { describeParams, KIND_ICONS, KIND_LABELS } from '../checklistKinds.js';
 import { formatMoney } from '../format.js';
+import { Icon, ResultIcon, ResultPill, resultOf } from './ui.jsx';
 
-const STATUS_TEXT = {
-  PENDING: 'Not checked yet',
-  CHECKING: 'Checking now',
-  PASS: 'Passed',
-  FAIL: 'Failed',
-  UNSURE: 'Unsure, needs a person',
-};
+const isResult = (status) => status === 'PASS' || status === 'FAIL' || status === 'UNSURE';
+const needsAttention = (item) => item.status === 'FAIL' || item.status === 'UNSURE';
 
-function StatusIcon({ status }) {
+// The item being checked right now: while the job is CHECKING, the first one still pending.
+export function withChecking(job) {
+  const index = job.status === 'CHECKING' ? job.items.findIndex((i) => !isResult(i.status)) : -1;
+  return job.items.map((item, i) => (i === index ? { ...item, status: 'CHECKING' } : { ...item, status: item.status || 'PENDING' }));
+}
+
+function Evidence({ item }) {
+  const screenshots = item.evidence?.screenshots || [];
+  const logUrl = item.evidence?.logUrl;
+  const confidence = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+
   return (
-    <span className={`status-icon status-icon--${status.toLowerCase()}`}>
-      {status === 'CHECKING' && <span className="spinner spinner--small" aria-hidden="true" />}
-      {status === 'PASS' && (
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
+    <div className="it__body">
+      <div className="it__why result__reasoning">
+        <span className="eyebrow">Evidence</span>
+        {item.reasoning || 'No details were recorded for this check.'}
+        {(screenshots.length > 0 || logUrl) && (
+          <div className="evidence">
+            {screenshots.map((id) => (
+              <a key={id} href={screenshotUrl(id)} target="_blank" rel="noreferrer" className="evidence__shot">
+                <img src={screenshotUrl(id)} alt="Screenshot the checker took" loading="lazy" />
+              </a>
+            ))}
+            {logUrl && (
+              <a href={logUrl} target="_blank" rel="noreferrer" className="evidence__link">
+                <Icon name="ext" size={13} />
+                View the test log
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+      {confidence !== null && (
+        <div className="conf">
+          <span className="eyebrow" style={{ fontSize: 10 }}>Confidence</span>
+          <span className="mono" style={{ fontSize: 20 }}>{confidence}%</span>
+          <div className="conf__bar">
+            <i style={{ width: `${confidence}%`, background: confidence >= 70 ? 'var(--pass)' : 'var(--unsure)' }} />
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>70% needed to act alone</span>
+        </div>
       )}
-      {status === 'FAIL' && (
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
-      )}
-      {status === 'UNSURE' && <span aria-hidden="true">?</span>}
-      <span className="visually-hidden">{STATUS_TEXT[status]}</span>
-    </span>
+    </div>
   );
 }
 
-// Read-only checklist with each item's result. While the job is CHECKING, the first
-// item still pending is the one being checked right now.
-export default function ChecklistView({ job }) {
-  const checkingIndex = job.status === 'CHECKING' ? job.items.findIndex((i) => i.status === 'PENDING') : -1;
+function Item({ item, amount, currency, open, onToggle }) {
+  const r = resultOf(item.status);
+  const hasEvidence = isResult(item.status);
+  const header = (
+    <>
+      <span className="it__ic">
+        {item.status === 'PENDING' ? <Icon name={KIND_ICONS[item.kind] || 'check'} size={14} /> : <ResultIcon key={item.status} status={item.status} />}
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span className="it__t result__text" style={{ display: 'block' }}>{item.text}</span>
+        <span className="it__sub">
+          <span className="tag">{KIND_LABELS[item.kind] || item.kind}</span>
+          <span>{describeParams(item)}</span>
+        </span>
+      </span>
+      <ResultPill status={item.status} />
+      <span className="it__v">
+        {formatMoney((amount * item.weight) / 100, currency)}
+        <small>{item.weight}%</small>
+      </span>
+      <span className="it__chev" style={{ opacity: hasEvidence ? 1 : 0 }}>
+        <Icon name="chev" size={14} />
+      </span>
+    </>
+  );
 
   return (
-    <ol className="results">
-      {job.items.map((item, index) => {
-        const status = index === checkingIndex ? 'CHECKING' : item.status || 'PENDING';
-        const screenshots = item.evidence?.screenshots || [];
-        const logUrl = item.evidence?.logUrl;
-        const showConfidence = typeof item.confidence === 'number' && item.confidence < 1;
+    <li className={`it result result--${(item.status || 'PENDING').toLowerCase()} ${r.key}${open && hasEvidence ? ' open' : ''}`}>
+      {hasEvidence ? (
+        <button type="button" className="it__h" onClick={onToggle} aria-expanded={open}>
+          {header}
+        </button>
+      ) : (
+        <div className="it__h">{header}</div>
+      )}
+      {open && hasEvidence && <Evidence item={item} />}
+    </li>
+  );
+}
 
-        return (
-          <li key={item._id || index} className={`result result--${status.toLowerCase()}`}>
-            {/* Keyed by status so a new result swaps in with a short entrance. */}
-            <StatusIcon key={status} status={status} />
-            <div className="result__body">
-              <div className="result__top">
-                <span className="result__text">{item.text}</span>
-                <span className="result__weight">
-                  {item.weight}% · {formatMoney((job.amount * item.weight) / 100, job.currency)}
-                </span>
-              </div>
-              <p className="result__meta">
-                <span className="kind-tag">{KIND_LABELS[item.kind] || item.kind}</span>
-                <span className="muted">{describeParams(item)}</span>
-              </p>
-              {item.reasoning && (
-                <p className="result__reasoning">
-                  {item.reasoning}
-                  {showConfidence && <span className="muted"> AI confidence {Math.round(item.confidence * 100)}%.</span>}
-                </p>
-              )}
-              {(screenshots.length > 0 || logUrl) && (
-                <div className="evidence">
-                  {screenshots.map((id) => (
-                    <a key={id} href={screenshotUrl(id)} target="_blank" rel="noreferrer" className="evidence__shot">
-                      <img src={screenshotUrl(id)} alt="Screenshot the checker took" loading="lazy" />
-                    </a>
-                  ))}
-                  {logUrl && (
-                    <a href={logUrl} target="_blank" rel="noreferrer" className="evidence__link">
-                      View the test log
-                    </a>
-                  )}
-                </div>
-              )}
-            </div>
-          </li>
-        );
-      })}
+// Read-only checklist with each item's result. Failed and unsure items open by themselves,
+// so the evidence a person needs is already showing; any checked item can be opened.
+export default function ChecklistView({ job }) {
+  const items = withChecking(job);
+  const [open, setOpen] = useState(() => new Set(items.map((it, i) => (needsAttention(it) ? i : -1))));
+  const seen = useRef(items.map((it) => it.status));
+
+  // A result that lands as FAIL or UNSURE while someone is watching opens too.
+  useEffect(() => {
+    const opened = [];
+    items.forEach((it, i) => {
+      if (needsAttention(it) && seen.current[i] !== it.status) opened.push(i);
+    });
+    seen.current = items.map((it) => it.status);
+    if (opened.length) setOpen((current) => new Set([...current, ...opened]));
+  });
+
+  function toggle(i) {
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  return (
+    <ol className="items results">
+      {items.map((item, i) => (
+        <Item
+          key={item._id || i}
+          item={item}
+          amount={job.amount}
+          currency={job.currency}
+          open={open.has(i)}
+          onToggle={() => toggle(i)}
+        />
+      ))}
     </ol>
   );
 }

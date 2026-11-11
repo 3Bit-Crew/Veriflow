@@ -15,6 +15,19 @@ export const KIND_LABELS = {
   lighthouse_score: 'Lighthouse score',
 };
 
+// Icon for each kind (names from components/ui.jsx), shown before an item is checked.
+export const KIND_ICONS = {
+  tests_pass: 'code',
+  files_changed: 'file',
+  page_loads: 'globe',
+  element_exists: 'cursor',
+  text_present: 'text',
+  visual: 'eye',
+  speed_score: 'gauge',
+  interaction: 'cursor',
+  lighthouse_score: 'gauge',
+};
+
 // Lighthouse category ids (PLAN.md 13.2) as a person would write them.
 const LIGHTHOUSE_NAMES = { accessibility: 'accessibility', 'best-practices': 'best practices', seo: 'SEO' };
 
