@@ -10,6 +10,7 @@
 > **How to read this:** sections 1–4 explain the project. **Section 5 is the contract between the three of us.** If your code matches section 5, it will fit with everyone else's. If you need to change section 5, tell the other two first and update this file.
 
 > **Latest changes (Nov 11):**
+> - **New dates and final work plan in section 13:** code freeze **Nov 12, 4 pm IST**, submit by **Nov 12, ~10 pm IST**. These replace the Nov 11 dates in section 7. Section 13 also covers interaction checks, Lighthouse scores and the PageSpeed key.
 > - **New demo:** the code job is now a **checkout coupon feature**, not the login bug. Section 10 has everything: what the demo repo and site contain, how to prepare, and the script. **B:** the demo repo runs each test as its own GitHub Actions job, so `github.js` names the failed tests (10.1). No code change needed.
 > - **Worker email:** on Render, `POST /api/jobs` only accepts the sandbox worker account set in `PAYPAL_WORKER_EMAIL` (5.8). Use `sb-m8uku53787938@business.example.com`.
 > - **No pushes to `main` while anyone is testing, recording or judging** (8.5). Every push redeploys Render.
@@ -241,6 +242,8 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 | `text_present` | website | `{ "text": "Sign up" }` | Playwright | Must |
 | `visual` | website | `{ "viewport": "mobile" }` (`desktop` or `mobile`) | AI vision on screenshot | Must |
 | `speed_score` | website | `{ "min": 80 }` | PageSpeed Insights API | Should |
+| `interaction` | website | `{ "steps": "Paste a long link and click Shrink It", "viewport": "desktop" }` (`viewport`: `desktop` or `mobile`; steps ≤ 300 characters) | Playwright + AI: plans clicks/typing, does them, judges before/after screenshots | Added Nov 11 (section 13.1) |
+| `lighthouse_score` | website | `{ "category": "accessibility", "min": 90 }` (category: `accessibility`, `best-practices` or `seo`) | PageSpeed Insights API (Lighthouse) | Planned (section 13.2) |
 
 **Rules:**
 - Use an exact check whenever possible. Use `visual` only for things like "looks good on mobile" or "matches the brand colors".
@@ -248,6 +251,13 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 - Weights are whole numbers and must add up to **100**. The route rejects the checklist otherwise.
 - `mustTouch` / `mustNotTouch` paths: a path ending in `/` means "anything in that folder" (from the repo root). A path starting with `*` means "any file whose name ends with this", e.g. `*.test.js`.
 - **Test protection (added automatically to every code job):** a `files_changed` item "The buyer's tests and CI setup were not modified" with `mustNotTouch: [".github/", "test/", "tests/", "__tests__/", "spec/", "*.test.js", "*.spec.js", "*.test.ts", "*.spec.ts"]`. This stops a worker from editing the tests to make them pass. If the job itself asks to change tests (a `mustTouch` on a test path), those paths are left out. The buyer can still delete the item in the editor.
+- **`interaction` items** (details in 13.1):
+  - Use them for anything that only appears after a user types or clicks (a QR code after "Shrink It", a message after submitting a form). `element_exists`, `text_present` and `visual` only see the page before anyone uses it.
+  - At most **2 per checklist** (A's route rejects more).
+  - The AI only writes them when the server has **`INTERACTION_CHECKS=true`** (8.3). Jobs that already have one are checked either way.
+  - Each item takes **about 2 minutes at most** (hard limit), so a website job can take several minutes in total.
+  - A step that can't be done (no matching button or field, login or captcha needed, timeout, AI error) gives **`UNSURE`, never `FAIL`**, so a person decides. Only the AI judging a page where every step worked can give `FAIL`.
+- **Never invent CSS selectors.** Use `element_exists` only for standard HTML (`input[type=email]`, `form`, `img`) or a selector written in the job description.
 
 ### 5.4 Checker result (every checker returns this, one per item)
 ```json
@@ -501,10 +511,12 @@ AI_PROVIDER=gemini                      # gemini | groq  (text only; images alwa
 GEMINI_API_KEY=...
 GROQ_API_KEY=...
 GITHUB_TOKEN=...
-PAGESPEED_API_KEY=...                   # optional
+PAGESPEED_API_KEY=...                   # needed for speed checks: without it they all come back UNSURE (13.3)
+INTERACTION_CHECKS=true                 # true = the AI may write "interaction" items (5.3, 13.1); unset/false = off
+PAYPAL_WORKER_EMAIL=sb-m8uku53787938@business.example.com   # sandbox business account that owns the PayPal app; the only worker email allowed (5.8). Leave empty locally to allow any
+CHECKER_LOOP=true                       # true on Render; false on laptops once Render is live (one checker per database)
 ADMIN_KEY=...                           # reviewer key for payouts (5.10), long random string
 AGENT_API_KEY=...                       # Agent API key (5.10, stretch)
-PAYPAL_WORKER_EMAIL=sb-m8uku53787938@business.example.com   # the only worker email allowed (5.8). Leave empty locally to allow any
 ```
 `client/.env`
 ```
@@ -633,7 +645,7 @@ The buyer's 6 tests:
 | Playwright doesn't run on Render | Use a Dockerfile based on the official Playwright image (`mcr.microsoft.com/playwright`). If still stuck by day 4, run the server on a laptop for the demo. |
 | Render free plan runs out of memory with Playwright | One job at a time, close the browser after each job, small viewports, JPEG screenshots. |
 | Render free server "sleeps" after ~15 min idle (first request takes ~1 min), and the checker loop pauses while asleep | Open the site a few minutes before recording or judging. |
-| Server restarts in the middle of a check | The loop puts a job stuck in `CHECKING` for 10+ minutes back in the queue (5.6). To avoid it during recording, nobody pushes to `main` (8.5). |
+| Server restarts in the middle of a check | Every minute the loop puts jobs stuck in `CHECKING` for over 10 minutes back to `SUBMITTED` (5.6). Only old ones, so during a Render deploy the new server doesn't re-check the job the old server is still finishing. That 10-minute wait would ruin a take, so nobody pushes to `main` while someone is recording (8.5). |
 | GitHub Actions slow during the demo | Keep the test suite tiny (finishes in under 30s). Open the demo PRs before recording so the results already exist (10.2). Pre-record that part of the video if needed. |
 | Running out of time | Cut in this order: speed check → Agent API → website job → keep the code job only. **Don't cut resubmit**, the demo needs it. |
 | Deployed site breaks on demo day | Record the video from a working run on day 5–6. Don't change code after the freeze. |
@@ -649,3 +661,85 @@ The buyer's 6 tests:
 - [ ] Architecture image + screenshots
 - [ ] All 3 team members added to the Devpost project
 - [ ] Re-read the official Rules page once (eligibility, video length, required items)
+
+---
+
+## 13. Final additions (Nov 11–12)
+
+**Submission target: Nov 12, ~10 pm IST.** Devpost closes Nov 12, 12:00 PM Pacific (about 1:30 am IST on Nov 13), so 10 pm leaves a buffer.
+**Code freeze: Nov 12, 4 pm IST.** After that, only fixes for bugs found while recording the video.
+
+Three pieces of work, in this order. Don't start the next one until the one before it works on Render.
+
+| # | Work | Owner(s) | Status |
+|---|---|---|---|
+| 13.1 | Interaction checks (AI clicks and types on the site) | M, K, H | K done; M on branch `b/interaction-check`; H done (PR #16) |
+| 13.3 | PageSpeed API key | K | To do (blocks 13.2) |
+| 13.2 | Lighthouse scores (accessibility, best practices, SEO) | M, K, H | Planned |
+
+### 13.1 Interaction checks
+
+**Why:** the website checker only looked at the page as it first loads, so anything that appears after a click (a QR code after "Shrink It", a success message after a form) was always marked FAIL with 100% confidence, even when the work was correct. The AI also guessed CSS class names like `.qr-code` that don't exist.
+
+**How it works:** for an `interaction` item, the checker opens the site in a fresh tab, lists the visible inputs, buttons and links, and the AI turns `params.steps` into at most 5 actions on those elements (fill, select, click, press Enter). Playwright does them, then the AI judges the before and after screenshots against the item text. The "after" screenshot is saved as the item's evidence.
+
+**Safety rules (already built):**
+- A step that can't be done (no matching button, login or captcha needed, timeout) gives **UNSURE → human review**, never FAIL.
+- The AI can only act on elements from the list, with those 4 actions. No made-up selectors, no visiting other URLs.
+- The checker's browser blocks every request to localhost or a private address (uses K's `isPrivateHost`).
+- Each item has a 2-minute limit. Planning uses Groq first (fast); judging uses Gemini.
+- Switch: `INTERACTION_CHECKS=true` on the server. Off = the AI never writes interaction items. Jobs that already have one are still checked.
+- The checklist AI no longer invents CSS selectors, and the `visual` judge answers UNSURE (not FAIL) for anything that only appears after a click.
+
+**Tasks:**
+- [x] **K:** `validate.js` accepts `interaction` (steps ≤ 300 characters, viewport desktop/mobile, max 2 per checklist); `isPrivateHost` exported.
+- [x] **M:** checker (`checkers/interaction.js`), wired into `website.js` and `loop.js`, checklist rules and prompts, `scripts/test-interaction.js`. Tested: ShrinkThis QR → PASS, wrong expectation → FAIL, impossible steps → UNSURE.
+- [ ] **M:** push branch `b/interaction-check` and open a pull request. One retry when Gemini times out while judging.
+- [ ] **K:** add `INTERACTION_CHECKS=true` to `render.yaml` and `server/.env.example`. Set it on Render (already added in the dashboard).
+- [x] **H:** `checklistKinds.js`: label `interaction: 'Interaction (AI)'`, `describeParams` → "AI will, on desktop: …" or "AI will, on mobile: …" followed by the steps (the viewport was added). `fakeApi.js`: `interaction` added to the website kinds, with a fake result and screenshot, and the same max-2 rule as the server. In PR #16.
+- [ ] **All:** after merge, run one real website job on Render with an interaction item and watch the Render logs for memory errors.
+
+**Deploy order:** K's part is already live, so M's branch can merge any time. H's part can go out separately; without it the item shows the raw word "interaction", but nothing breaks.
+
+### 13.2 Lighthouse scores (accessibility, best practices, SEO)
+
+**Why:** PageSpeed Insights already runs Google Lighthouse. We only read the performance score. The same call also returns accessibility, best-practice and SEO scores: exact, stable numbers that fit Veriflow's "proof, not opinion" pitch, at no extra time or quota.
+
+**Contract (new kind, see 5.3):**
+- `lighthouse_score` with params `{ "category": "accessibility" | "best-practices" | "seo", "min": 0–100 }`.
+- `speed_score` stays as it is for performance, so existing jobs and H's labels don't change.
+- One PageSpeed call per job, asking for every category the checklist needs (mobile).
+- Score ≥ min → PASS (confidence 1.0). Score below → FAIL. API error → UNSURE.
+- The AI uses it only when the description asks for it ("accessible", "SEO-friendly", "follows best practices"), at most one item per category.
+
+**Tasks:**
+- [ ] **M:** `checkers/speed.js` reads all needed categories from one call and returns results for `speed_score` and `lighthouse_score` items. Add the kind to `ai/checklistRules.js` (`cleanParams`: category from the list, `min` 0–100, default 90) and the prompt. Test script run on 2 sites. **~45 min**
+- [ ] **K:** `validate.js`: `lighthouse_score: (p) => ['accessibility','best-practices','seo'].includes(p.category) && Number.isFinite(p.min) && p.min >= 0 && p.min <= 100`. **~10 min**
+- [ ] **H:** `checklistKinds.js`: label `lighthouse_score: 'Lighthouse score'`, `describeParams` → `` `Lighthouse ${params.category} score of at least ${params.min}` ``. `fakeApi.js`: add the kind. **~10 min**
+- [ ] **All:** move the 5.3 row from "Planned" to done.
+
+**Deploy order:** K's rule must be live **before or together with** M's change. Otherwise the AI writes `lighthouse_score` items that the approve route rejects, and buyers can't approve website checklists. Merge K's PR first, or put both in one PR.
+
+**Start only after 13.1 works on Render and 13.3 is done. Skip it if that isn't true by Nov 12, 12 pm IST.**
+
+### 13.3 PageSpeed API key (owner: K)
+
+**Why:** without a key, PageSpeed uses a quota shared by everyone on the internet, and it's already used up (tested Nov 11: "Quota exceeded" every time). Every speed check then comes back UNSURE, so **every website job with a speed item goes to human review** instead of paying out.
+
+**Tasks (K, ~10 min):**
+- [ ] console.cloud.google.com → create or pick a project → enable **PageSpeed Insights API**.
+- [ ] APIs & Services → Credentials → **Create credentials → API key**. Restrict it to the PageSpeed Insights API.
+- [ ] Render → veriflow-api → Environment: `PAGESPEED_API_KEY` = the key. Save, rebuild, and deploy (when nobody is testing).
+- [ ] Share the key privately with M and H for their local `server/.env`. **Never commit it.**
+- [ ] Check: run a website job with a speed item, or `node scripts/test-website.js` locally with the key; the speed item should show a real score.
+
+Free limit: about 25,000 checks a day.
+
+### 13.4 Render environment checklist (veriflow-api)
+
+| Variable | Value | Owner | Status |
+|---|---|---|---|
+| `INTERACTION_CHECKS` | `true` | M | Added |
+| `PAYPAL_WORKER_EMAIL` | Sandbox business account that owns the PayPal app | K | Check it's set |
+| `PAGESPEED_API_KEY` | Key from 13.3 | K | To do |
+| `CHECKER_LOOP` | `true` (laptops: `false`) | K | Set |
