@@ -70,7 +70,11 @@ export function validateNewJob(body) {
 
   // Code jobs: the repo the PR goes to. Website jobs: the buyer's repo that receives the site's
   // source code as a PR, so the buyer owns the code, not only a link.
-  const repo = repoUrl ? cleanRepoUrl(repoUrl) : '';
+  // Website jobs: the repo is optional until the New job page sends it (PLAN.md 13.5, H's task).
+  // Without a repo the job uses the URL-only flow that older website jobs use (no source_delivered
+  // item, no sourcePrUrl), so the live app keeps working whichever side is deployed first.
+  const repo = isNonEmptyString(repoUrl) ? cleanRepoUrl(repoUrl) : '';
+  if (type === 'website' && !repo) return job;
   if (!GITHUB_REPO.test(repo)) {
     throw httpError(400, type === 'code'
       ? 'Code jobs need repoUrl like https://github.com/owner/repo'
