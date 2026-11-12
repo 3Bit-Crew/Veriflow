@@ -14,14 +14,22 @@
 
 import { cleanPullRequestUrl } from '../pullRequest.js';
 
-const STORAGE_KEY = 'veriflow.fakeApi.v1';
+// v2: website jobs have a repo and a source code item (PLAN.md 13.5), so older saved sample data is replaced.
+const STORAGE_KEY = 'veriflow.fakeApi.v2';
 const STEP_MS = 1500; // time between each simulated check
 const LATENCY_MS = 150;
 
 const ALLOWED_KINDS = {
   code: ['tests_pass', 'files_changed'],
-  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score', 'interaction', 'lighthouse_score'],
+  website: ['page_loads', 'element_exists', 'text_present', 'visual', 'speed_score', 'interaction', 'lighthouse_score', 'source_delivered'],
 };
+
+// Website jobs deliver their source code as a PR in the buyer's repo (PLAN.md 13.5). The sample
+// jobs use the real demo-site repo and one of its real commits, so "Get the code" links work.
+const SITE_REPO = 'https://github.com/3Bit-Crew/veriflow-demo-site';
+const SITE_COMMIT = 'de475b91b581665c8e6f7ca816e320ef191cb726';
+// Same item the server adds by itself (SOURCE_ITEM_TEXT in server/src/ai/checklistRules.js).
+const SOURCE_ITEM = { text: 'The source code is delivered as a pull request to your GitHub repo', kind: 'source_delivered', params: {}, weight: 10 };
 const MAX_ITEMS = 8;
 const MAX_INTERACTION_ITEMS = 2; // same limit as the server: each one drives a real browser
 
@@ -101,9 +109,10 @@ function checklistFor(job) {
   }
   return [
     { text: 'Home page loads', kind: 'page_loads', params: { path: '/' }, weight: 20 },
-    { text: 'Signup form has an email field', kind: 'element_exists', params: { selector: 'input[type=email]' }, weight: 25 },
+    SOURCE_ITEM,
+    { text: 'Signup form has an email field', kind: 'element_exists', params: { selector: 'input[type=email]' }, weight: 20 },
     { text: 'Page says "Sign up"', kind: 'text_present', params: { text: 'Sign up' }, weight: 20 },
-    { text: 'Looks good on mobile', kind: 'visual', params: { viewport: 'mobile' }, weight: 35 },
+    { text: 'Looks good on mobile', kind: 'visual', params: { viewport: 'mobile' }, weight: 30 },
   ];
 }
 
@@ -113,10 +122,11 @@ function checklistFor(job) {
 function generatedChecklist(job) {
   const items = checklistFor(job);
   if (job.type !== 'website') return items;
-  const [loads, field, text, visual] = items;
+  const [loads, source, field, text, visual] = items;
   return [
     { ...loads, weight: 15 },
-    { ...field, weight: 20 },
+    source,
+    { ...field, weight: 15 },
     { ...text, weight: 15 },
     {
       text: 'Signing up shows a thank-you message',
@@ -124,7 +134,7 @@ function generatedChecklist(job) {
       params: { steps: 'Type an email into the signup field and click Sign up', viewport: 'desktop' },
       weight: 20,
     },
-    { ...visual, weight: 30 },
+    { ...visual, weight: 25 },
   ];
 }
 
@@ -175,6 +185,30 @@ function scenarioOf(job) {
 // (RESTRICTED_FILES_NOTE in server/src/decision.js); the payout rule treats it as cheating.
 const RESTRICTED_FILES_NOTE = 'changed files it must not touch';
 
+// The commit a website job's source PR is "checked" at: the real demo-site commit for that repo.
+function commitFor(job) {
+  return job.repoUrl === SITE_REPO ? SITE_COMMIT : (newId() + newId()).slice(0, 40);
+}
+
+const prNumber = (url) => String(url || '').split('/pull/')[1] || '?';
+
+// The source code item, like checkSourcePr in server/src/checkers/github.js.
+function sourceResult(job, fails) {
+  const name = job.repoUrl.replace('https://github.com/', '');
+  const n = prNumber(job.sourcePrUrl);
+  if (fails) {
+    return { status: 'FAIL', confidence: 1, reasoning: `Pull request #${n} does not change any files.`, evidence: { screenshots: [], logUrl: job.sourcePrUrl || null } };
+  }
+  const sha = commitFor(job);
+  return {
+    status: 'PASS',
+    confidence: 1,
+    reasoning: `Pull request #${n} in ${name} changes 3 file(s). Commit ${sha.slice(0, 7)} is the version that was checked, saved for the buyer.`,
+    evidence: { screenshots: [], logUrl: `${job.repoUrl}/tree/${sha}` },
+    sha,
+  };
+}
+
 // The item that goes wrong: tests for code jobs, the visual check for website jobs.
 function weakItemIndex(job) {
   const index = job.items.findIndex((i) => i.kind === 'tests_pass' || i.kind === 'visual');
@@ -193,6 +227,9 @@ function resultFor(job, index) {
     screenshots: isVisual ? [`fake-${viewport}`] : [],
     logUrl: item.kind === 'tests_pass' ? 'https://github.com/3Bit-Crew/veriflow-demo/actions' : null,
   };
+
+  // The PR with the site's source code passes, except when everything fails ("void" jobs).
+  if (item.kind === 'source_delivered') return sourceResult(job, scenario === 'void');
 
   if (scenario === 'review' && isWeak) {
     return {
@@ -301,7 +338,9 @@ function stepChecker(state, job, sim) {
   const count = job.title.toLowerCase().includes('batch') ? job.items.length - sim.index : 1;
   for (let k = 0; k < count; k += 1) {
     const item = job.items[sim.index];
-    Object.assign(item, resultFor(job, sim.index));
+    const { sha, ...result } = resultFor(job, sim.index);
+    Object.assign(item, result);
+    if (sha) job.sourceCommit = sha; // the exact version the buyer gets
     addEvent(state, job._id, 'CHECK_RESULT', `${item.status}: ${item.text}`, { itemId: item._id, status: item.status });
     sim.index += 1;
   }
@@ -373,6 +412,11 @@ function seedJob(state, fields, itemResults) {
 const passed = (reasoning, extra = {}) => ({ status: 'PASS', confidence: 1, reasoning, ...extra });
 const failed = (reasoning, extra = {}) => ({ status: 'FAIL', confidence: 1, reasoning, ...extra });
 const REPO = 'https://github.com/3Bit-Crew/veriflow-demo';
+// A passed source code item, with the commit the job saves (PLAN.md 13.5).
+const sourcePassed = (n) =>
+  passed(`Pull request #${n} in 3Bit-Crew/veriflow-demo-site changes 3 file(s). Commit ${SITE_COMMIT.slice(0, 7)} is the version that was checked, saved for the buyer.`, {
+    evidence: { screenshots: [], logUrl: `${SITE_REPO}/tree/${SITE_COMMIT}` },
+  });
 
 function buildSeedState() {
   const state = { jobs: [], events: [], sims: {} };
@@ -381,15 +425,18 @@ function buildSeedState() {
     title: 'Redesign the pricing page',
     description: 'Clearer pricing page with three plans and a signup button on each.',
     type: 'website',
+    repoUrl: SITE_REPO,
     amount: 300,
     status: 'SETTLED',
     attempts: 2,
     submissionUrl: 'https://pricing-demo.example.com',
+    sourcePrUrl: `${SITE_REPO}/pull/3`,
     payoutAmount: 0,
     settlement: 'VOID',
     ageMinutes: 2880,
   }, [
     failed('The page returned status 500.'),
+    failed('Pull request #3 does not change any files.', { evidence: { screenshots: [], logUrl: `${SITE_REPO}/pull/3` } }),
     failed('No email field was found.'),
     failed('The text "Sign up" was not found.'),
     failed('The page is blank on a 390px screen.', { confidence: 0.95 }),
@@ -399,16 +446,20 @@ function buildSeedState() {
     title: 'Bakery landing page',
     description: 'Landing page with a signup form that looks good on mobile.',
     type: 'website',
+    repoUrl: SITE_REPO,
     amount: 150,
     status: 'SETTLED',
     attempts: 2,
     submissionUrl: 'https://bakery-demo.example.com',
+    sourcePrUrl: `${SITE_REPO}/pull/1`,
+    sourceCommit: SITE_COMMIT,
     // All or nothing: one item still failed on the second try, so the hold was voided.
     payoutAmount: 0,
     settlement: 'VOID',
     ageMinutes: 1440,
   }, [
     passed('The page returned status 200.'),
+    sourcePassed(1),
     passed('Found input[type=email] on desktop and mobile.'),
     passed('Found the text "Sign up".'),
     failed('The signup button is cut off at the right edge on a 390px screen.', { confidence: 0.9, evidence: { screenshots: ['fake-mobile'], logUrl: null } }),
@@ -435,13 +486,17 @@ function buildSeedState() {
     title: 'Contact form for the clinic site',
     description: 'A contact form with an email field. Must look good on mobile.',
     type: 'website',
+    repoUrl: SITE_REPO,
     amount: 120,
     status: 'NEEDS_REVIEW',
     attempts: 1,
     submissionUrl: 'https://clinic-demo.example.com',
+    sourcePrUrl: `${SITE_REPO}/pull/2`,
+    sourceCommit: SITE_COMMIT,
     ageMinutes: 240,
   }, [
     passed('The page returned status 200.'),
+    sourcePassed(2),
     passed('Found input[type=email] on desktop and mobile.'),
     passed('Found the text "Sign up".'),
     { status: 'UNSURE', confidence: 0.55, reasoning: 'Could not tell with confidence. A person should look at the evidence.', evidence: { screenshots: ['fake-mobile'], logUrl: null } },
@@ -488,6 +543,7 @@ function buildSeedState() {
     title: 'Portfolio site for a photographer',
     description: 'A portfolio home page with a contact section.',
     type: 'website',
+    repoUrl: SITE_REPO,
     amount: 180,
     status: 'CHECKLIST_READY',
     ageMinutes: 30,
@@ -537,8 +593,11 @@ export function createJob(input) {
     }
     if (!ALLOWED_KINDS[type]) fail(400, 'Type must be code or website');
     if (!(Number(amount) > 0)) fail(400, 'Amount must be more than 0');
-    if (type === 'code' && !/^https:\/\/github\.com\/[^/]+\/[^/]+\/?$/.test(repoUrl || '')) {
-      fail(400, 'Code jobs need a repo URL like https://github.com/owner/repo');
+    // Both types need the buyer's repo, like the server (PLAN.md 13.5).
+    if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/?$/.test(repoUrl || '')) {
+      fail(400, type === 'code'
+        ? 'Code jobs need repoUrl like https://github.com/owner/repo'
+        : 'Website jobs need repoUrl like https://github.com/owner/repo (the worker delivers the source code there)');
     }
 
     const now = new Date().toISOString();
@@ -556,7 +615,7 @@ export function createJob(input) {
       createdAt: now,
       updatedAt: now,
     };
-    if (type === 'code') job.repoUrl = repoUrl.replace(/\/$/, '');
+    job.repoUrl = repoUrl.replace(/\/$/, '');
     state.jobs.push(job);
     addEvent(state, job._id, 'JOB_CREATED', `Job created: ${job.title}`);
     return job;
@@ -575,7 +634,8 @@ export function generateChecklist(id) {
 }
 
 // The same rules the server applies, see findChecklistProblems in server/src/ai/checklistRules.js.
-function checklistProblem(type, items) {
+function checklistProblem(job, items) {
+  const { type } = job;
   if (!Array.isArray(items) || items.length === 0) return 'Checklist is empty';
   if (items.length > MAX_ITEMS) return `At most ${MAX_ITEMS} items allowed`;
   if (items.some((i) => !i.text?.trim())) return 'Every item needs text';
@@ -585,6 +645,10 @@ function checklistProblem(type, items) {
   if (sum !== 100) return `Weights add up to ${sum}, must be 100`;
   if (type === 'code' && items.filter((i) => i.kind === 'tests_pass').length !== 1) {
     return 'Code jobs need exactly one tests_pass item';
+  }
+  if (type === 'website' && job.repoUrl) {
+    const source = items.filter((i) => i.kind === 'source_delivered').length;
+    if (source !== 1) return `Website jobs need exactly one source_delivered item (found ${source})`;
   }
   const interactions = items.filter((i) => i.kind === 'interaction').length;
   if (interactions > MAX_INTERACTION_ITEMS) {
@@ -601,7 +665,7 @@ export function approveChecklist(id, items) {
   return call((state) => {
     const job = findJob(state, id);
     requireStatus(job, 'DRAFT');
-    const problem = checklistProblem(job.type, items);
+    const problem = checklistProblem(job, items);
     if (problem) fail(400, problem);
     job.items = items.map(({ text, kind, params, weight }) => buildItem({ text: text.trim(), kind, params: params || {}, weight }));
     job.status = 'CHECKLIST_READY';
@@ -635,7 +699,7 @@ export function authorizePayPalOrder(orderId, jobId) {
   });
 }
 
-export function submitWork(id, submissionUrl) {
+export function submitWork(id, submissionUrl, sourcePrUrl) {
   return call((state) => {
     const job = findJob(state, id);
     requireStatus(job, 'FUNDED', 'CHANGES_REQUESTED');
@@ -647,8 +711,19 @@ export function submitWork(id, submissionUrl) {
     } else if (!url.startsWith('http')) {
       fail(400, 'Website URL must start with http');
     }
+    // Website jobs with a repo also send the PR with the site's source code (PLAN.md 13.5).
+    let sourcePr = null;
+    if (job.type === 'website' && job.repoUrl) {
+      if (!sourcePrUrl?.trim()) {
+        fail(400, `sourcePrUrl is required: the pull request with the site's source code, like ${job.repoUrl}/pull/123`);
+      }
+      sourcePr = cleanPullRequestUrl(job.repoUrl, sourcePrUrl.trim());
+      if (!sourcePr) fail(400, `sourcePrUrl must be a pull request in the buyer's repo, like ${job.repoUrl}/pull/123`);
+    }
 
     job.submissionUrl = url;
+    if (sourcePr) job.sourcePrUrl = sourcePr;
+    delete job.sourceCommit; // set again by the checker for this try
     job.status = 'SUBMITTED';
     job.items.forEach((item) => {
       item.status = 'PENDING';
@@ -657,7 +732,7 @@ export function submitWork(id, submissionUrl) {
       delete item.reasoning;
     });
     touch(job);
-    addEvent(state, job._id, 'WORK_SUBMITTED', `Worker submitted ${url}`, { url });
+    addEvent(state, job._id, 'WORK_SUBMITTED', `Worker submitted ${url}${sourcePr ? ` with the source code in ${sourcePr}` : ''}`, { url });
     startCheck(state, job);
     return job;
   });

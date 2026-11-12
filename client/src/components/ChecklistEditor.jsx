@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { approveChecklist } from '../api.js';
-import { checklistProblems, describeParams, KIND_LABELS } from '../checklistKinds.js';
+import { checklistProblems, describeParams, KIND_LABELS, needsSourceItem } from '../checklistKinds.js';
 import { Icon } from './ui.jsx';
 
 // Payouts are all or nothing (PLAN.md 5.5): the worker is paid only when every item passes.
@@ -67,16 +67,25 @@ export default function ChecklistEditor({ job, onApproved, onChange }) {
   const [error, setError] = useState(null);
 
   const payload = items.map(toPayload);
-  const problems = checklistProblems(job.type, payload);
+  const needsSource = needsSourceItem(job);
+  const problems = checklistProblems(job.type, payload, { needsSource });
   const total = payload.reduce((sum, item) => sum + (Number.isFinite(item.weight) ? item.weight : 0), 0);
 
   useEffect(() => {
     onChange?.(items);
   }, [items, onChange]);
 
-  // Code jobs need exactly one "Tests pass" item (PLAN.md 5.3), and a checklist needs at least one item.
-  const isRequired = (item) => job.type === 'code' && item.kind === 'tests_pass';
+  // Code jobs need exactly one "Tests pass" item (PLAN.md 5.3), website jobs with a repo one
+  // "Source code" item (13.5), and a checklist needs at least one item. Their weight can still change.
+  const isRequired = (item) =>
+    (job.type === 'code' && item.kind === 'tests_pass') || (needsSource && item.kind === 'source_delivered');
   const canRemove = (item) => items.length > 1 && !isRequired(item);
+  const lockReason = (item) => {
+    if (!isRequired(item)) return 'A checklist needs at least one item';
+    return item.kind === 'tests_pass'
+      ? 'Code jobs always check that the tests pass'
+      : 'Website jobs always check that the source code arrives as a pull request';
+  };
 
   function update(index, field, value) {
     setItems((current) => current.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
@@ -191,7 +200,7 @@ export default function ChecklistEditor({ job, onApproved, onChange }) {
                   <Icon name="trash" size={15} />
                 </button>
               ) : (
-                <span className="ci__lock required-note" title={isRequired(item) ? 'Code jobs always check that the tests pass' : 'A checklist needs at least one item'}>
+                <span className="ci__lock required-note" title={lockReason(item)}>
                   <Icon name="lock" size={14} />
                 </span>
               )}

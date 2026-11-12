@@ -13,6 +13,7 @@ export const KIND_LABELS = {
   speed_score: 'Speed score',
   interaction: 'Interaction (AI)',
   lighthouse_score: 'Lighthouse score',
+  source_delivered: 'Source code',
 };
 
 // Icon for each kind (names from components/ui.jsx), shown before an item is checked.
@@ -26,6 +27,7 @@ export const KIND_ICONS = {
   speed_score: 'gauge',
   interaction: 'cursor',
   lighthouse_score: 'gauge',
+  source_delivered: 'code',
 };
 
 // Lighthouse category ids (PLAN.md 13.2) as a person would write them.
@@ -58,13 +60,21 @@ export function describeParams({ kind, params = {} }) {
     case 'lighthouse_score':
       // Google Lighthouse accessibility, best-practices or SEO score, from the same PageSpeed call (PLAN.md 13.2).
       return `Lighthouse ${LIGHTHOUSE_NAMES[params.category] || params.category} score of at least ${params.min}`;
+    case 'source_delivered':
+      // Website jobs (PLAN.md 13.5): open or merged, in the job's repo, changing at least one file.
+      return "The site's source code must be a pull request in the job's GitHub repo";
     default:
       return '';
   }
 }
 
+// Website jobs with a repo deliver their source code there, so their checklist must keep the
+// automatic "Source code" item (PLAN.md 13.5). Jobs made before the change have no repo.
+export const needsSourceItem = (job) => job.type === 'website' && Boolean(job.repoUrl);
+
 // Returns the reasons a checklist can't be approved yet. An empty list means it's valid.
-export function checklistProblems(type, items) {
+// needsSource: the job is a website job with a repo (needsSourceItem).
+export function checklistProblems(type, items, { needsSource = false } = {}) {
   if (items.length === 0) return ['The checklist needs at least one item.'];
 
   const problems = [];
@@ -81,6 +91,9 @@ export function checklistProblems(type, items) {
 
   if (type === 'code' && items.filter((item) => item.kind === 'tests_pass').length !== 1) {
     problems.push('Code jobs need exactly one "Tests pass" item.');
+  }
+  if (needsSource && items.filter((item) => item.kind === 'source_delivered').length !== 1) {
+    problems.push('Website jobs need exactly one "Source code" item.');
   }
   return problems;
 }

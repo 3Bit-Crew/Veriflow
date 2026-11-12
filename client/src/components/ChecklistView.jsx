@@ -32,7 +32,7 @@ function Evidence({ item }) {
             {logUrl && (
               <a href={logUrl} target="_blank" rel="noreferrer" className="evidence__link">
                 <Icon name="ext" size={13} />
-                View the test log
+                {item.kind === 'source_delivered' ? 'View the code at this commit' : 'View the test log'}
               </a>
             )}
           </div>

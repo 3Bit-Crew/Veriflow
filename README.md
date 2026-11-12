@@ -65,11 +65,11 @@ All screenshots come from the running application, using its built-in **sample-d
 
 <img src="docs/screenshots/create-job-checklist.png" alt="Create a job, step 2: the AI-written checklist for a coupon-code job with weights set by slider or typed percentage, beside a dark contract card showing $200.00, the worker, the repository and the all-or-nothing payout rule" width="100%" />
 
-The buyer picks **Code** (a GitHub pull request) or **Website** (a live URL), describes the job, and the AI writes the checklist. Each item can be reworded, reweighted (slider or typed percentage) or removed, with undo. The contract card on the right updates live, and the buyer then holds the payment with the PayPal button. *(The real AI also adds an automatic "the buyer's tests and CI setup were not modified" item to every code job; sample-data mode shows a shorter checklist.)*
+The buyer picks **Code** (a GitHub pull request) or **Website** (a live URL, plus the site's source code as a pull request in the buyer's repo), describes the job, and the AI writes the checklist. Each item can be reworded, reweighted (slider or typed percentage) or removed, with undo. The contract card on the right updates live, and the buyer then holds the payment with the PayPal button. *(The real AI also adds an automatic "the buyer's tests and CI setup were not modified" item to every code job; sample-data mode shows a shorter checklist.)*
 
 ### Live verification, result by result
 
-<img src="docs/screenshots/job-live-checking.png" alt="Job page while a website job is being checked: $200.00 held in escrow, a score bar at 50%, three items passed, the interaction check in progress with a spinner, and a live activity timeline" width="100%" />
+<img src="docs/screenshots/job-live-checking.png" alt="Job page while a website job is being checked: $200.00 held in escrow, a score bar at 55%, four items passed including the source code pull request, the interaction check in progress with a spinner, and a live activity timeline" width="100%" />
 
 The job page polls the API every 2 seconds. Results that arrive together are revealed one at a time, about a second apart, so the check reads as progress. The vault card shows what is held, the score bar, and the next step for every status.
 
@@ -101,6 +101,21 @@ The job page polls the API every 2 seconds. Results that arrive together are rev
 <img src="docs/screenshots/worker-submit.png" alt="The worker submit page: $200.00 held for this job, a field for the pull request URL with a 'Submit for checking' button, the buyer's brief and the checklist that will be checked" width="100%" />
 
 The buyer sends the worker a link to `/jobs/:id/submit`, the only page where work is submitted. It shows what is held, the brief and exactly what will be checked, and validates the URL before sending (for code jobs it must be a pull request in the job's repository).
+
+### Website jobs: the buyer gets the code
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/website-submit-source.png" alt="The submit page of a website job: two fields, the live website URL and the pull request with the site's source code in the buyer's repo 3Bit-Crew/veriflow-demo-site, above a Submit for checking button" />
+      <p><b>Two links.</b> The worker sends the live site and a pull request with its source code in the buyer's own GitHub repo. Both are checked before anything is sent.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/job-website-get-code.png" alt="A paid website job: $200.00 released to the worker, and a Get the code box with the saved commit de475b9 and buttons to browse the code or download it as a ZIP; the details card links the source pull request and the checked commit" />
+      <p><b>Get the code.</b> The commit that passed is saved with the job. After the payout the buyer can browse it or download it as a ZIP, even if the worker deletes their branch.</p>
+    </td>
+  </tr>
+</table>
 
 ### Audit dashboard built with AG Grid
 

@@ -54,7 +54,7 @@ function Nav() {
           </Link>
         </nav>
         <div className="nav__right">
-          {isFakeApi ? (
+          {isFakeApi && (
             <button
               type="button"
               className="sandbox fake-chip"
@@ -64,11 +64,6 @@ function Nav() {
               <b />
               <span className="sandbox--label">Sample data · </span>Reset
             </button>
-          ) : (
-            <span className="sandbox">
-              <b />
-              <span className="sandbox--label">PayPal </span>sandbox
-            </span>
           )}
           <NavLink to="/jobs/new" className="btn btn--primary btn--sm">
             <Icon name="plus" size={14} />
