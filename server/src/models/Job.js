@@ -19,7 +19,7 @@ const JobSchema = new Schema({
   title:         { type: String, required: true },
   description:   { type: String, required: true },  // buyer's plain-English request
   type:          { type: String, enum: ['code', 'website'], required: true },
-  repoUrl:       String,                             // code jobs only: https://github.com/owner/repo
+  repoUrl:       String,                             // buyer's repo, https://github.com/owner/repo (code and website jobs)
   amount:        { type: Number, required: true },   // e.g. 200 (USD)
   currency:      { type: String, default: 'USD' },
   buyerEmail:    String,                             // sandbox personal account
@@ -28,7 +28,9 @@ const JobSchema = new Schema({
   paypalOrderId: String,
   paypalAuthId:  String,
   submissionUrl: String,                             // PR URL (code) or website URL (website)
-  attempts:      { type: Number, default: 0 },       // how many times the work was checked
+  sourcePrUrl:   String,                             // website jobs: PR in repoUrl with the site's source code
+  sourceCommit:  String,                             // website jobs: the PR's commit that was checked (what the buyer gets)
+  attempts:      { type: Number, default: 0 },       // how many times the worker submitted (set by POST /submit)
   payoutAmount:  Number,                             // set when SETTLED
   settlement:    { type: String, enum: ['FULL', 'PARTIAL', 'VOID'] }, // set when SETTLED
   items:         [ChecklistItemSchema]

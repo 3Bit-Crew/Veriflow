@@ -68,11 +68,15 @@ export function validateNewJob(body) {
   };
   if (isNonEmptyString(buyerEmail)) job.buyerEmail = buyerEmail.trim();
 
-  if (type === 'code') {
-    const repo = repoUrl ? cleanRepoUrl(repoUrl) : '';
-    if (!GITHUB_REPO.test(repo)) throw httpError(400, 'Code jobs need repoUrl like https://github.com/owner/repo');
-    job.repoUrl = repo;
+  // Code jobs: the repo the PR goes to. Website jobs: the buyer's repo that receives the site's
+  // source code as a PR, so the buyer owns the code, not only a link.
+  const repo = repoUrl ? cleanRepoUrl(repoUrl) : '';
+  if (!GITHUB_REPO.test(repo)) {
+    throw httpError(400, type === 'code'
+      ? 'Code jobs need repoUrl like https://github.com/owner/repo'
+      : 'Website jobs need repoUrl like https://github.com/owner/repo (the worker delivers the source code there)');
   }
+  job.repoUrl = repo;
   return job;
 }
 
@@ -91,6 +95,8 @@ const KIND_RULES = {
                           (isNonEmptyString(p.path) && p.path.startsWith('/') && !/^\/*[a-z][\w+.-]*:/i.test(p.path)) ||
                           'needs params.path like "/" or "/about"',
     element_exists: (p) => isNonEmptyString(p.selector) || 'needs params.selector',
+    // Added automatically when the job has a repo: the source code arrives as a PR in that repo
+    source_delivered: () => true,
     text_present:   (p) => isNonEmptyString(p.text) || 'needs params.text',
     visual:         (p) => ['desktop', 'mobile'].includes(p.viewport) || 'needs params.viewport "desktop" or "mobile"',
     speed_score:    (p) => (Number.isFinite(p.min) && p.min >= 0 && p.min <= 100) || 'needs params.min between 0 and 100',
@@ -138,6 +144,12 @@ export function validateChecklist(job, items) {
     if (tests !== 1) throw httpError(400, `Code jobs need exactly one tests_pass item (found ${tests})`);
   }
 
+  // Website jobs with a repo: the "source code delivered" item can't be removed (it's what makes the buyer own the code)
+  if (job.type === 'website' && job.repoUrl) {
+    const source = clean.filter((it) => it.kind === 'source_delivered').length;
+    if (source !== 1) throw httpError(400, `Website jobs need exactly one source_delivered item (found ${source})`);
+  }
+
   const interactions = clean.filter((it) => it.kind === 'interaction').length;
   if (interactions > MAX_INTERACTION_ITEMS) {
     throw httpError(400, `At most ${MAX_INTERACTION_ITEMS} interaction items (found ${interactions})`);
@@ -170,17 +182,33 @@ export function isPrivateHost(hostname) {
   return !h.includes('.'); // one-word names like "veriflow-api" only exist inside a private network
 }
 
+// A PR in this repo → its one clean form "https://github.com/o/r/pull/12", or null.
+// Also accepts what people copy from the PR page: .../pull/12/files, .../pull/12#issuecomment-1, ?w=1
+function cleanPrUrl(repoUrl, url) {
+  const repo = repoUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(url).trim().match(new RegExp(`^${repo}/pull/(\\d+)(?:/[\\w-]*)*/?(?:[?#].*)?$`, 'i'));
+  return match ? `${repoUrl}/pull/${match[1]}` : null;
+}
+
+// Checks sourcePrUrl of POST /api/jobs/:id/submit (website jobs): a PR in the buyer's repo.
+export function validateSourcePrUrl(job, sourcePrUrl) {
+  if (!isNonEmptyString(sourcePrUrl)) {
+    throw httpError(400, `sourcePrUrl is required: the pull request with the site's source code, like ${job.repoUrl}/pull/123`);
+  }
+  const pr = cleanPrUrl(job.repoUrl, sourcePrUrl);
+  if (!pr) throw httpError(400, `sourcePrUrl must be a pull request in the buyer's repo, like ${job.repoUrl}/pull/123`);
+  return pr;
+}
+
 // Checks POST /api/jobs/:id/submit. Code jobs: a PR in the job's repo. Website jobs: a public http(s) URL.
 export function validateSubmissionUrl(job, submissionUrl) {
   if (!isNonEmptyString(submissionUrl)) throw httpError(400, 'submissionUrl is required');
   const url = submissionUrl.trim();
 
   if (job.type === 'code') {
-    // Also accept what people copy from the PR page: .../pull/12/files, .../pull/12#issuecomment-1, ?w=1
-    const repo = job.repoUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = url.match(new RegExp(`^${repo}/pull/(\\d+)(?:/[\\w-]*)*/?(?:[?#].*)?$`, 'i'));
-    if (!match) throw httpError(400, `submissionUrl must be a pull request like ${job.repoUrl}/pull/123`);
-    return `${job.repoUrl}/pull/${match[1]}`; // one clean form for the GitHub checker
+    const pr = cleanPrUrl(job.repoUrl, url);
+    if (!pr) throw httpError(400, `submissionUrl must be a pull request like ${job.repoUrl}/pull/123`);
+    return pr;
   }
 
   let parsed;

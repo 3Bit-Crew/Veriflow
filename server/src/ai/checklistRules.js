@@ -11,6 +11,7 @@ export const ALLOWED_KINDS = {
     "speed_score",
     "interaction",
     "lighthouse_score",
+    "source_delivered",
   ],
 };
 
@@ -109,6 +110,17 @@ function addTestProtection(items) {
   return [items[0], item, ...items.slice(1)];
 }
 
+// Website jobs: the site's source code must arrive as a PR in the buyer's repo (so the buyer
+// owns the code, not only a link). The AI never writes this item; it's always added here.
+export const SOURCE_ITEM_TEXT =
+  "The source code is delivered as a pull request to your GitHub repo";
+function addSourceItem(items) {
+  const rest = items.filter((i) => i.kind !== "source_delivered");
+  const item = { text: SOURCE_ITEM_TEXT, kind: "source_delivered", params: {}, weight: 10 };
+  // Second place, after the main "page loads" item; keep within MAX_ITEMS.
+  return [...rest.slice(0, 1), item, ...rest.slice(1)].slice(0, MAX_ITEMS);
+}
+
 const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
 const cleanPathList = (list) =>
   Array.isArray(list) ? list.filter(isNonEmptyString).map((p) => p.trim()) : [];
@@ -149,6 +161,8 @@ function cleanParams(kind, params = {}) {
     }
     case "page_loads":
       return { path: cleanPagePath(p.path) };
+    case "source_delivered":
+      return {};
     case "element_exists":
       return isNonEmptyString(p.selector)
         ? withPath({ selector: p.selector.trim() }, p.path)
@@ -235,8 +249,8 @@ function defaultItems(type) {
  * @param {Array<{text, kind, params, weight}>} items
  * @returns {Array<{text, kind, params, weight, status}>}
  */
-export function validateAndFixItems(type, items) {
-  const allowed = allowedKinds(type);
+export function validateAndFixItems(type, items, { addSource = type === "website" } = {}) {
+  const allowed = allowedKinds(type).filter((k) => k !== "source_delivered"); // only added by addSourceItem
   if (!allowed) throw new Error(`Unknown job type: ${type}`);
 
   let cleaned = (Array.isArray(items) ? items : [])
@@ -286,6 +300,7 @@ export function validateAndFixItems(type, items) {
 
   cleaned = cleaned.slice(0, MAX_ITEMS);
   if (cleaned.length === 0) cleaned = defaultItems(type);
+  if (type === "website" && addSource) cleaned = addSourceItem(cleaned);
 
   const weights = normalizeWeights(cleaned.map((i) => i.weight));
   return cleaned.map((item, idx) => ({

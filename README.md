@@ -50,7 +50,7 @@ Veriflow holds a freelance payment on **PayPal**, checks the submitted **GitHub 
 
 1. **Agree.** The buyer describes the job in plain English. An AI (Google Gemini, with Groq as a text backup) turns it into a weighted checklist, which the buyer edits and approves. The approved checklist is the contract.
 2. **Hold.** The buyer approves the payment in the PayPal popup. The money is **authorized, not charged**.
-3. **Prove.** The worker submits a GitHub pull request or a public website URL. Checkers gather evidence for every item: test results, changed files, a real browser, AI-judged screenshots, Lighthouse scores.
+3. **Prove.** The worker submits a GitHub pull request, or for a website a public URL plus a pull request with the site's source code in the buyer's repo. Checkers gather evidence for every item: test results, changed files, a real browser, AI-judged screenshots, Lighthouse scores.
 4. **Release.** A small, tested rule turns the results into a PayPal **capture** (paid in full) or **void** (money back to the buyer). The AI only reports results; it never moves money.
 
 **Who it's for.** Buyers hiring freelancers for code or website work, freelancers who want to be paid as soon as their work provably meets the brief, and platforms exploring **agentic commerce**, where automated agents need a neutral way to verify work before paying.
@@ -153,6 +153,7 @@ The buyer sends the worker a link to `/jobs/:id/submit`, the only page where wor
 | `visual` | Website | Gemini judges the desktop or mobile screenshot against the requirement. |
 | `interaction` | Website | The AI plans up to 5 actions (fill, select, click, press Enter) on the elements it can see, Playwright performs them, and Gemini compares the before and after screenshots. At most 2 per checklist, 2 minutes each. |
 | `speed_score` · `lighthouse_score` | Website | One Google PageSpeed Insights call per job asks for every category the checklist needs: performance, accessibility, best practices or SEO. |
+| `source_delivered` | Website | Added automatically to every website job. The site's source code must be a pull request in the buyer's repo, open or merged, changing at least one file. The checked commit is saved, so the buyer owns that exact version (browse or ZIP), even if the branch is deleted later. |
 
 Every checker returns `PASS`, `FAIL` or `UNSURE` with a confidence and a human-readable reason. A checker that crashes or times out returns `UNSURE` instead of throwing, so the job goes to a person rather than failing unfairly.
 
@@ -295,6 +296,8 @@ erDiagram
         string paypalOrderId
         string paypalAuthId
         string submissionUrl
+        string sourcePrUrl "website: source code PR"
+        string sourceCommit "website: checked commit"
         number attempts
         number payoutAmount
         string settlement "FULL, PARTIAL or VOID"
@@ -490,6 +493,7 @@ The project has no unit-test framework; these scripts call the real modules dire
 | `node scripts/test-checklist.js` | AI checklist generation (`AI_PROVIDER=groq` to try Groq) |
 | `node scripts/test-github.js <PR URL> [--touch=path] [--not-touch=path] [--now]` | The pull request checker |
 | `node scripts/test-website.js <URL> [--text=…] [--selector=…]` | The website checker; saves both screenshots |
+| `node scripts/test-source-pr.js <repo URL> <PR URL>` | The website source-code check; prints the saved commit and ZIP link |
 | `node scripts/test-interaction.js <URL> "<expected result>" "<steps>" [desktop\|mobile]` | One interaction check |
 | `node scripts/test-judge.js <image> "<requirement>" [desktop\|mobile]` | The AI screenshot judge |
 | `node scripts/test-loop.js [--keep]` | The checker loop against the real database (creates and deletes `[TEST]` jobs) |
@@ -505,14 +509,14 @@ All responses are JSON. Errors are `{ "error": "message" }` with status `400` (b
 | Method | Path | Purpose | Allowed when the job is |
 |---|---|---|---|
 | `GET` | `/api/health` | Liveness and database status | — |
-| `POST` | `/api/jobs` | Create a job `{ title, description, type, amount, workerEmail, repoUrl? }` | — |
+| `POST` | `/api/jobs` | Create a job `{ title, description, type, amount, workerEmail, repoUrl }` (`repoUrl` required for code and website jobs) | — |
 | `GET` | `/api/jobs` | All jobs, newest first | — |
 | `GET` | `/api/jobs/:id` | `{ job, events }` (events newest first) | — |
 | `POST` | `/api/jobs/:id/checklist` | Ask the AI for a checklist | `DRAFT` |
 | `PUT` | `/api/jobs/:id/checklist` | Approve the edited checklist `{ items: [{ text, kind, params, weight }] }` | `DRAFT` |
 | `POST` | `/api/paypal/orders` | Create the PayPal order `{ jobId }` → `{ orderId }` | `CHECKLIST_READY` |
 | `POST` | `/api/paypal/orders/:orderId/authorize` | Authorize after buyer approval `{ jobId }` | `CHECKLIST_READY` |
-| `POST` | `/api/jobs/:id/submit` | Submit work `{ submissionUrl }` (counts a try) | `FUNDED`, `CHANGES_REQUESTED` |
+| `POST` | `/api/jobs/:id/submit` | Submit work `{ submissionUrl, sourcePrUrl? }` (`sourcePrUrl` required for website jobs; counts a try) | `FUNDED`, `CHANGES_REQUESTED` |
 | `POST` | `/api/jobs/:id/review` | Human decision `{ payoutAmount }` (0 to the job amount) | `NEEDS_REVIEW` |
 | `GET` | `/api/events` | Audit log (latest 1,000), each with `jobTitle` | — |
 | `GET` | `/api/screenshots/:id` | A checker screenshot (JPEG) | — |

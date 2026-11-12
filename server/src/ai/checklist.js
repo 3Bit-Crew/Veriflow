@@ -16,5 +16,6 @@ export async function generateChecklist(job) {
 
   const reply = await generateJSON(checklistPrompt(job));
   const items = Array.isArray(reply) ? reply : reply?.items;
-  return validateAndFixItems(job.type, items);
+  // Website jobs with a repo get the automatic "source code delivered" item.
+  return validateAndFixItems(job.type, items, { addSource: job.type === "website" && Boolean(job.repoUrl) });
 }
