@@ -28,6 +28,10 @@ Veriflow holds a freelance payment on **PayPal**, checks the submitted **GitHub 
 ## Table of contents
 
 - [Overview](#overview)
+- [Try it (for judges)](#try-it-for-judges)
+- [How we use PayPal](#how-we-use-paypal)
+- [How we use AI](#how-we-use-ai)
+- [Sponsor and third-party integrations](#sponsor-and-third-party-integrations)
 - [Product tour](#product-tour)
 - [Key features](#key-features)
 - [How the payout is decided](#how-the-payout-is-decided)
@@ -50,12 +54,76 @@ Veriflow holds a freelance payment on **PayPal**, checks the submitted **GitHub 
 
 1. **Agree.** The buyer describes the job in plain English. An AI (Google Gemini, with Groq as a text backup) turns it into a weighted checklist, which the buyer edits and approves. The approved checklist is the contract.
 2. **Hold.** The buyer approves the payment in the PayPal popup. The money is **authorized, not charged**.
-3. **Prove.** The worker submits a GitHub pull request, or for a website a public URL plus a pull request with the site's source code in the buyer's repo. Checkers gather evidence for every item: test results, changed files, a real browser, AI-judged screenshots, Lighthouse scores.
+3. **Prove.** The worker submits a GitHub pull request, or for a website a public URL (plus, when the buyer gave a GitHub repo, a pull request with the site's source code in that repo). Checkers gather evidence for every item: test results, changed files, a real browser, AI-judged screenshots, Lighthouse scores.
 4. **Release.** A small, tested rule turns the results into a PayPal **capture** (paid in full) or **void** (money back to the buyer). The AI only reports results; it never moves money.
 
 **Who it's for.** Buyers hiring freelancers for code or website work, freelancers who want to be paid as soon as their work provably meets the brief, and platforms exploring **agentic commerce**, where automated agents need a neutral way to verify work before paying.
 
 > Built by team **3Bit-Crew** for the **PayPal AI Hackathon** on Devpost. Everything runs in the **PayPal sandbox**: no real money moves.
+
+## Try it (for judges)
+
+1. Open the **[live app](https://veriflow-web-f4u1.onrender.com)**. The first visit can take about a minute: the free Render server wakes up, and the app shows a "Waking up the server…" notice meanwhile.
+2. **Create a job**: describe the work in plain English and let the AI write the checklist, then edit and approve it.
+3. **Hold the payment** in the PayPal popup with the sandbox **buyer** (personal) account. The worker email is already filled in on the New job form: it's the sandbox business account the demo pays.
+4. Open the job's **submit link**, send a GitHub pull request or a website URL, and watch the results arrive one by one. The money is then captured or returned to the buyer.
+5. See everything in the **[dashboard](https://veriflow-web-f4u1.onrender.com/dashboard)** (AG Grid).
+
+**Sandbox test logins** (fake money) are in the Devpost submission's testing instructions, not in this public repo.
+**No accounts at all?** Run the UI in [sample-data mode](#try-the-ui-in-a-minute-no-accounts-needed) in a minute.
+
+## How we use PayPal
+
+PayPal is Veriflow's escrow. The buyer's money is **held** when the job starts and only **moved** once the checks finish. All calls go to the PayPal **sandbox**.
+
+| PayPal feature | What Veriflow does with it | Code |
+|---|---|---|
+| **OAuth 2.0** (client credentials) | The server logs in with the app's Client ID and Secret and reuses the access token until shortly before it expires. The Secret never leaves the server. | [`server/src/paypal/client.js`](server/src/paypal/client.js) |
+| **JavaScript SDK** (`@paypal/react-paypal-js`) | The PayPal button on the job page. The buyer approves the payment in PayPal's own popup. | [`client/src/components/PayPalButton.jsx`](client/src/components/PayPalButton.jsx) |
+| **Orders API v2**: create order with `intent: AUTHORIZE` | Creates the order for the job's amount, with the worker as **payee**. `AUTHORIZE` means the money is held, not charged. | [`server/src/paypal/orders.js`](server/src/paypal/orders.js) |
+| **Orders API v2**: authorize order | After the buyer approves, locks the hold. We save the authorization id and the payer's email, and the job becomes `FUNDED` only if PayPal confirms the hold. | [`server/src/routes/paypal.js`](server/src/routes/paypal.js) |
+| **Payments API v2**: capture authorization | When every checklist item passes, pays the worker the full amount with `final_capture: true`. | [`server/src/paypal/settle.js`](server/src/paypal/settle.js) |
+| **Payments API v2**: void authorization | When the work fails, cancels the hold so the buyer keeps all the money. | [`server/src/paypal/settle.js`](server/src/paypal/settle.js) |
+| **`PayPal-Request-Id`** (idempotency) | Sent with every authorize, capture and void, so a retried request is never applied twice. | `orders.js`, `settle.js` |
+
+**Why authorize-then-capture:** it is what makes Veriflow an escrow. PayPal guarantees the buyer's money is there, while nobody, including Veriflow, can spend it before the work is proven. Only one function, `settleJob()`, can capture or void, and if PayPal fails the job goes to human review with the money still held. See the [money flow diagram](#money-flow-end-to-end).
+
+**Known limitation:** PayPal lets an app void holds only when the payee is the app's own business account, so the demo uses one shared sandbox worker account (`PAYPAL_WORKER_EMAIL` enforces it). Paying many workers needs PayPal partner onboarding, and "Log in with PayPal" is designed for identity. Both are on the [roadmap](#roadmap).
+
+The PayPal flow was tested end to end (hold, capture, void) with [`server/scripts/paypal-test.js`](server/scripts/paypal-test.js), using real sandbox buyer approvals.
+
+## How we use AI
+
+AI does the parts that need judgement: writing the checklist and judging what a page looks like or does. **It never moves money.** A small, deterministic, tested rule decides the payout from the check results ([`server/src/decision.js`](server/src/decision.js)).
+
+| Where | Model | What it does | Code |
+|---|---|---|---|
+| **Checklist writing** | Google Gemini (Groq as backup) | Turns the buyer's plain-English request into a checklist of known item kinds, which the buyer edits and approves | [`server/src/ai/checklist.js`](server/src/ai/checklist.js), [`prompts.js`](server/src/ai/prompts.js) |
+| **Visual checks** (`visual`) | Google Gemini (vision) | Judges a desktop or phone screenshot against the requirement, e.g. "looks good on mobile" | [`server/src/checkers/visual.js`](server/src/checkers/visual.js) |
+| **Interaction checks** (`interaction`) | Groq plans, Gemini judges | Groq turns steps like "click Sign up, type an email, submit" into at most 5 actions on elements that really exist on the page. Playwright performs them, then Gemini compares the before and after screenshots. | [`server/src/checkers/interaction.js`](server/src/checkers/interaction.js) |
+
+**Guardrails**
+- **The AI only reports results.** Capture or void is decided by fixed rules, never by the model.
+- **AI output is cleaned on the server:** only allowed item kinds per job type, at most 8 items, weights normalised to whole numbers that add up to 100, an automatic "the buyer's tests weren't modified" item for code jobs ([`checklistRules.js`](server/src/ai/checklistRules.js)). The approve route checks everything again ([`server/src/validate.js`](server/src/validate.js)).
+- **When the AI isn't sure, a person decides.** Any `UNSURE` result or confidence below 70% sends the job to human review instead of failing the worker. A step that can't be done gives `UNSURE`, never `FAIL`.
+- **No made-up selectors or URLs.** Interaction plans can only use elements listed from the live page, and the checker's browser blocks localhost and private addresses.
+- **Resilient:** if Gemini is busy or out of quota, it falls back to lighter Gemini models, and text tasks can switch to Groq ([`server/src/ai/index.js`](server/src/ai/index.js)).
+
+Everything else is exact, not AI: GitHub Actions results and changed files from the GitHub API, page loads, elements and text from Playwright, and scores from Google Lighthouse.
+
+## Sponsor and third-party integrations
+
+| Integration | How Veriflow uses it |
+|---|---|
+| **[PayPal Developer](https://developer.paypal.com)** | Escrow: Orders API v2 (authorize), Payments API v2 (capture and void), OAuth 2.0, and the JavaScript SDK button. Sandbox only. See [How we use PayPal](#how-we-use-paypal). |
+| **[Render](https://render.com)** | Hosts the live app from a [Render Blueprint](render.yaml): the API runs as a **Docker** web service on the official Playwright image (Chromium preinstalled) with a `/api/health` check, and the React app is a **static site** with a rewrite rule for client-side routes. Auto-deploys from `main`. See [Deployment](#deployment). |
+| **[AG Grid](https://www.ag-grid.com)** (Community) | The audit dashboard: 3 grids (jobs, checklist results, events) with custom cell renderers, live row updates with cell flashing, filter chips, a totals row and CSV export. See [`client/src/components/grids/`](client/src/components/grids/). |
+| **[Google Gemini](https://ai.google.dev)** | Checklist writing and screenshot judging. See [How we use AI](#how-we-use-ai). |
+| **[Groq](https://groq.com)** | Fast planning of interaction steps, and backup for text tasks. |
+| **[Playwright](https://playwright.dev)** | A real Chromium browser that opens submitted websites at desktop and phone sizes, takes screenshots and performs interactions. |
+| **[GitHub REST API](https://docs.github.com/rest)** and **GitHub Actions** | Reads a pull request's test results (check runs) and changed files, and the source-code pull request of website jobs. A GitHub Actions workflow keeps the free Render API awake. |
+| **[Google PageSpeed Insights](https://developers.google.com/speed/docs/insights/v5/get-started)** | One Lighthouse run per job for performance, accessibility, best-practices and SEO scores. |
+| **[MongoDB Atlas](https://www.mongodb.com/atlas)** | Stores jobs, checklist results, the audit log and screenshots. |
 
 ## Product tour
 
@@ -153,7 +221,7 @@ The buyer sends the worker a link to `/jobs/:id/submit`, the only page where wor
 | `visual` | Website | Gemini judges the desktop or mobile screenshot against the requirement. |
 | `interaction` | Website | The AI plans up to 5 actions (fill, select, click, press Enter) on the elements it can see, Playwright performs them, and Gemini compares the before and after screenshots. At most 2 per checklist, 2 minutes each. |
 | `speed_score` · `lighthouse_score` | Website | One Google PageSpeed Insights call per job asks for every category the checklist needs: performance, accessibility, best practices or SEO. |
-| `source_delivered` | Website | Added automatically to every website job. The site's source code must be a pull request in the buyer's repo, open or merged, changing at least one file. The checked commit is saved, so the buyer owns that exact version (browse or ZIP), even if the branch is deleted later. |
+| `source_delivered` | Website | Added automatically to every website job that has a GitHub repo (the repo is optional). The site's source code must be a pull request in the buyer's repo, open or merged, changing at least one file. The checked commit is saved, so the buyer owns that exact version (browse or ZIP), even if the branch is deleted later. |
 
 Every checker returns `PASS`, `FAIL` or `UNSURE` with a confidence and a human-readable reason. A checker that crashes or times out returns `UNSURE` instead of throwing, so the job goes to a person rather than failing unfairly.
 
@@ -533,6 +601,7 @@ All responses are JSON. Errors are `{ "error": "message" }` with status `400` (b
 - **CORS allowlist** from `CLIENT_URL`; consistent JSON errors without stack traces.
 - **Idempotent payments:** `PayPal-Request-Id` on authorize, capture and void; `final_capture: true`; a failed settlement leaves the job in human review with the money held.
 - **Worker account lock:** with `PAYPAL_WORKER_EMAIL` set, jobs can only pay the sandbox account that is allowed to void, so a failed job can always return the buyer's money.
+- **No double submits:** submitting work checks the job's status, counts the try and resets the results in one atomic database update, so two submits at the same moment can't both count, and a submit can't overwrite a check that is already running.
 - **Resilient checking:** checkers never throw (problems become `UNSURE`); jobs stuck in `CHECKING` for 10 minutes are re-queued every minute; on `SIGTERM` the server stops taking jobs and waits up to 25 seconds for a running check; tries are counted at submission so restarts can't consume them.
 - **Audit trail:** every state change, PayPal call and check result is written to the `events` collection and shown in the dashboard.
 - **Container:** the API image runs as the non-root `pwuser`.
