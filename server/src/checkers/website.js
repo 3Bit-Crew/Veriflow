@@ -60,6 +60,7 @@ const loaded = (s) => s.status !== null && s.status >= 200 && s.status < 400;
 // So for https://h.github.io/demo/good/ :
 //   "/"      → https://h.github.io/demo/good/        (the submitted page itself)
 //   "/about" → https://h.github.io/demo/good/about
+// Returns null if the path would lead to another site.
 export function resolvePagePath(baseUrl, path = '/') {
   const rest = String(path).trim().replace(/^\/+/, '');
   if (!rest) return baseUrl;
@@ -69,11 +70,15 @@ export function resolvePagePath(baseUrl, path = '/') {
   // "…/good" (a folder without the final slash) → "…/good/", but keep "…/index.html" as a file.
   const lastPart = base.pathname.split('/').pop();
   if (lastPart && !lastPart.includes('.')) base.pathname += '/';
-  return new URL(rest, base).href;
+  const target = new URL(rest, base);
+  return target.origin === base.origin ? target.href : null;
 }
+
+const offSite = (item, idx) => result(item, idx, 'UNSURE', `The page "${item.params?.path}" is not on the submitted site.`, 0);
 
 async function checkPageLoads(context, baseUrl, main, item, idx) {
   const target = resolvePagePath(baseUrl, item.params?.path || '/');
+  if (!target) return offSite(item, idx);
   const sameAsMain = target === baseUrl;
 
   let res = main.desktop;
@@ -160,19 +165,42 @@ export async function checkWebsiteJob(job) {
       if (loaded(main[view])) screenshots[view] = await screenshot(pages[view]);
     }
 
+    // Items with params.path check another page of the site (e.g. "/jobs/new").
+    // Each extra page is opened once per viewport and shared by every item on it.
+    const extra = new Map();
+    async function pagesAt(target) {
+      if (target === url.href) return { pages, main };
+      if (!extra.has(target)) {
+        const p = { desktop: await context.desktop.newPage(), mobile: await context.mobile.newPage() };
+        extra.set(target, { pages: p, main: { desktop: await open(p.desktop, target), mobile: await open(p.mobile, target) } });
+      }
+      return extra.get(target);
+    }
+
     const results = [];
     for (const { item, idx } of items) {
       if (item.kind === 'page_loads') {
         results.push(await checkPageLoads(context, url.href, main, item, idx));
-      } else if (!loaded(main.desktop)) {
-        const why = main.desktop.error ? `could not open it: ${main.desktop.error}` : `HTTP ${main.desktop.status}`;
-        // Site is down or erroring: the element/text can't be there.
-        results.push(result(item, idx, main.desktop.error ? 'UNSURE' : 'FAIL', `The page did not load (${why}).`, main.desktop.error ? 0 : 1));
-      } else if (item.kind === 'element_exists') {
-        results.push(await checkElement(pages, item, idx));
-      } else {
-        results.push(await checkText(pages, item, idx));
+        continue;
       }
+      const target = resolvePagePath(url.href, item.params?.path || '/');
+      if (!target) {
+        results.push(offSite(item, idx));
+        continue;
+      }
+      const at = await pagesAt(target);
+      let r;
+      if (!loaded(at.main.desktop)) {
+        const why = at.main.desktop.error ? `could not open it: ${at.main.desktop.error}` : `HTTP ${at.main.desktop.status}`;
+        // Page is down or erroring: the element/text can't be there.
+        r = result(item, idx, at.main.desktop.error ? 'UNSURE' : 'FAIL', `The page did not load (${why}).`, at.main.desktop.error ? 0 : 1);
+      } else if (item.kind === 'element_exists') {
+        r = await checkElement(at.pages, item, idx);
+      } else {
+        r = await checkText(at.pages, item, idx);
+      }
+      if (target !== url.href) r.reasoning += ` Page checked: ${target}`;
+      results.push(r);
     }
 
     // Interaction items: same browser (no second Chrome in 512 MB), free the main tabs first.
@@ -181,7 +209,8 @@ export async function checkWebsiteJob(job) {
       await context.desktop.close().catch(() => {});
       await context.mobile.close().catch(() => {});
       for (const { item, idx } of interactionItems) {
-        interactions.push(await checkInteractionItem(browser, url.href, item, idx));
+        const target = resolvePagePath(url.href, item.params?.path || '/');
+        interactions.push(target ? await checkInteractionItem(browser, target, item, idx) : { result: offSite(item, idx), shot: null });
       }
     }
     return { results, screenshots, interactions };

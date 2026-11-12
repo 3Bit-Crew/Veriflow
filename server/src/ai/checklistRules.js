@@ -113,6 +113,28 @@ const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
 const cleanPathList = (list) =>
   Array.isArray(list) ? list.filter(isNonEmptyString).map((p) => p.trim()) : [];
 
+// A page inside the submitted site: "/jobs/new", or a full URL cut down to its path. Anything else -> "/".
+export function cleanPagePath(v) {
+  if (!isNonEmptyString(v)) return "/";
+  let s = v.trim();
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      s = u.pathname + u.search;
+    } catch {
+      return "/";
+    }
+  }
+  if (!s.startsWith("/") && !/^[a-z][\w+.-]*:/i.test(s)) s = `/${s}`; // "jobs/new" → "/jobs/new"
+  // "/http://other-site" would make the checker leave the site.
+  return s.startsWith("/") && !/^\/*[a-z][\w+.-]*:/i.test(s) ? s : "/";
+}
+// Only store a path when it isn't the submitted page itself.
+const withPath = (params, raw) => {
+  const path = cleanPagePath(raw);
+  return path === "/" ? params : { ...params, path };
+};
+
 // Returns cleaned params for a kind, or null if the params can't be used.
 function cleanParams(kind, params = {}) {
   const p = params && typeof params === "object" ? params : {};
@@ -126,18 +148,13 @@ function cleanParams(kind, params = {}) {
       return { mustTouch, mustNotTouch };
     }
     case "page_loads":
-      return {
-        path:
-          isNonEmptyString(p.path) && p.path.startsWith("/")
-            ? p.path.trim()
-            : "/",
-      };
+      return { path: cleanPagePath(p.path) };
     case "element_exists":
       return isNonEmptyString(p.selector)
-        ? { selector: p.selector.trim() }
+        ? withPath({ selector: p.selector.trim() }, p.path)
         : null;
     case "text_present":
-      return isNonEmptyString(p.text) ? { text: p.text.trim() } : null;
+      return isNonEmptyString(p.text) ? withPath({ text: p.text.trim() }, p.path) : null;
     case "visual":
       return { viewport: p.viewport === "desktop" ? "desktop" : "mobile" };
     case "speed_score": {
@@ -158,10 +175,13 @@ function cleanParams(kind, params = {}) {
     case "interaction":
       // steps = what a user does first, in plain English ("Paste a long link and click Shrink It").
       return isNonEmptyString(p.steps)
-        ? {
-            steps: p.steps.trim().slice(0, MAX_STEPS_TEXT),
-            viewport: p.viewport === "mobile" ? "mobile" : "desktop",
-          }
+        ? withPath(
+            {
+              steps: p.steps.trim().slice(0, MAX_STEPS_TEXT),
+              viewport: p.viewport === "mobile" ? "mobile" : "desktop",
+            },
+            p.path,
+          )
         : null;
     default:
       return null;

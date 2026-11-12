@@ -183,8 +183,29 @@ async function perform(page, a, open, isLast) {
   else if (a.do === 'select') {
     await target.selectOption({ label: a.value }, opts).catch(() => target.selectOption(a.value, opts));
   } else if (a.do === 'press') await target.press('Enter', opts);
-  else await target.click(opts);
+  else await click(target, a.el, opts);
   await settle(page, open, isLast ? FINAL_SETTLE_MS : 5000);
+}
+
+// Styled radio cards and checkboxes often hide the real <input> under their <label>, so a
+// normal click can't reach it. Then click the label (what a person clicks), and last force it.
+async function click(target, el, opts) {
+  const label = target.locator('xpath=ancestor::label[1]');
+  const hasLabel = el.tag === 'input' && ['radio', 'checkbox'].includes(el.type) && (await label.count()) > 0;
+  if (hasLabel) {
+    try {
+      return await label.click(opts);
+    } catch { /* fall through to the input itself */ }
+  }
+  try {
+    return await target.click(opts);
+  } catch (err) {
+    try {
+      return await target.click({ ...opts, force: true });
+    } catch {
+      throw err;
+    }
+  }
 }
 
 // ---------- main entry ----------
