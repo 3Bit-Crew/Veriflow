@@ -1041,6 +1041,11 @@ textarea.input {
   gap: 16px;
 }
 
+/* A last card alone on its row (7 cards in 3 or 2 columns) spans the row instead of leaving a gap. */
+.checks .check:last-child:nth-child(3n + 1) {
+  grid-column: 1 / -1;
+}
+
 .check {
   padding: 22px;
 }
@@ -2742,6 +2747,70 @@ button.it__h {
   color: #f0a59c;
 }
 
+/* Website jobs submit two links: the live site and the PR with its source code (PLAN.md 13.5) */
+.submit-box--two {
+  display: grid;
+  gap: 16px;
+}
+
+.submit-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.submit-field__label {
+  font-size: 13px;
+  font-weight: 550;
+  color: #e9eeeb;
+}
+
+.submit-field .hint {
+  margin: 0;
+}
+
+.submit-box__send {
+  height: 44px;
+  justify-self: start;
+}
+
+.submit-box--two .form-error {
+  margin-top: 0;
+}
+
+/* Get the code: the commit that passed, after a payout (PLAN.md 13.5) */
+.get-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+}
+
+.get-code__text {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.get-code__text p {
+  margin: 6px 0 0;
+  color: #e9eeeb;
+  font-size: 13.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.get-code__sha {
+  color: var(--lime);
+  font-size: 12.5px;
+}
+
+.get-code__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .toast {
   position: fixed;
   bottom: 24px;
@@ -3127,7 +3196,17 @@ button.it__h {
   }
 
   .submit-row .btn,
-  .copy-row .btn {
+  .copy-row .btn,
+  .submit-box__send {
+    width: 100%;
+  }
+
+  .get-code__actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .get-code__actions .btn {
     width: 100%;
   }
 }

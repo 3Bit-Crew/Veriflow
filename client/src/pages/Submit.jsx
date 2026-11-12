@@ -95,7 +95,9 @@ export default function Submit() {
               {canSubmit
                 ? isRetry
                   ? 'Fix the items marked below, then submit again. This is your last try: if anything still fails, nothing is paid.'
-                  : "Every checklist item below is checked automatically, and every one must pass to be paid. Changing a protected file (like the buyer's tests) cancels the job at once."
+                  : job.type === 'code'
+                    ? "Every checklist item below is checked automatically, and every one must pass to be paid. Changing a protected file (like the buyer's tests) cancels the job at once."
+                    : "Every checklist item below is checked automatically, and every one must pass to be paid. Send the live site and a pull request with its source code in the buyer's repo."
                 : notFunded
                   ? 'You can submit once the buyer has approved the checklist and held the payment.'
                   : 'Follow the checks and the payout on the job page.'}

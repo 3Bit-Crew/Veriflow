@@ -858,8 +858,8 @@ Free limit: about 25,000 checks a day.
 **Work**
 - [x] **K's files (done by M, with the user's OK):** `models/Job.js` (`sourcePrUrl`, `sourceCommit`), `validate.js` (repo required for website jobs, `validateSourcePrUrl`, `source_delivered` rule, approve needs the item), `routes/jobs.js` (submit takes `sourcePrUrl`, clears `sourceCommit`).
 - [x] **M:** `checkSourcePr` in `checkers/github.js`, website branch of `checkers/loop.js`, automatic item in `ai/checklistRules.js`, prompt rule, `scripts/test-source-pr.js`, `scripts/test-loop.js`.
-- [ ] **H:** New job page: repo field for website jobs too. Submit page: second field for the PR. `api.js`: `submitWork(id, submissionUrl, sourcePrUrl)`. Job page: show the PR, and after payout a **"Get the code"** link (commit + ZIP) from `job.sourceCommit`. `checklistKinds.js`: label and icon for `source_delivered`. Checklist editor: the item can't be deleted.
-- [ ] **Demo:** open PRs in `3Bit-Crew/veriflow-demo-site` (e.g. one per version) before recording, and use that repo for the website demo job.
+- [x] **H:** New job page: repo field for website jobs too. Submit page: second field for the PR. `api.js`: `submitWork(id, submissionUrl, sourcePrUrl)`. Job page: show the PR, and after payout a **"Get the code"** link (commit + ZIP) from `job.sourceCommit`. `checklistKinds.js`: label and icon for `source_delivered`. Checklist editor: the item can't be deleted. Also: sample-data mode follows the same rules, the landing page lists the check, and "Get the code" is not shown on a voided job (nothing was bought).
+- [ ] **Demo:** open PRs in `3Bit-Crew/veriflow-demo-site` (e.g. one per version) before recording, and use that repo for the website demo job. Planned: #1 `site-broken`, #2 `site-good` (demo/README.md).
 
 **Deploy order:** the backend makes the repo and the PR **required**, so the live site can't create or submit website jobs until H's part is live. Merge both together, before the freeze and before recording.
 

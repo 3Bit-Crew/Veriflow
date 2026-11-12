@@ -62,7 +62,8 @@ const real = {
   approveChecklist: (id, items) => request('PUT', `/api/jobs/${id}/checklist`, { items }),
   createPayPalOrder: (jobId) => request('POST', '/api/paypal/orders', { jobId }),
   authorizePayPalOrder: (orderId, jobId) => request('POST', `/api/paypal/orders/${orderId}/authorize`, { jobId }),
-  submitWork: (id, submissionUrl) => request('POST', `/api/jobs/${id}/submit`, { submissionUrl }),
+  // sourcePrUrl: website jobs, the pull request with the site's source code (PLAN.md 13.5)
+  submitWork: (id, submissionUrl, sourcePrUrl) => request('POST', `/api/jobs/${id}/submit`, { submissionUrl, sourcePrUrl }),
   reviewJob: (id, payoutAmount) => request('POST', `/api/jobs/${id}/review`, { payoutAmount }),
   getJobs: () => request('GET', '/api/jobs'),
   getJob: (id) => request('GET', `/api/jobs/${id}`), // returns { job, events }
