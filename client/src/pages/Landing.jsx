@@ -146,7 +146,7 @@ function StepViz({ n }) {
 const STEPS = [
   ['Agree', 'Buyer', 'Describe the job in plain English. AI turns it into a weighted checklist you approve. The checklist is the contract.'],
   ['Hold', 'PayPal', 'You approve the payment on PayPal. It is authorized and held, not charged.'],
-  ['Prove', 'Worker', 'The worker submits a pull request or a live URL. Every item is checked against real evidence.'],
+  ['Prove', 'Worker', 'The worker submits a pull request, or a live URL plus its source code. Every item is checked against real evidence.'],
   ['Release', 'Veriflow', 'A fixed rule decides: every item passes and PayPal pays in full. Otherwise the hold goes back to the buyer.'],
 ];
 
@@ -166,6 +166,7 @@ const CHECKS = [
   ['cursor', 'Website', 'Interaction (AI)', 'The AI types and clicks like a user, then judges what happened.', 'Playwright · Gemini'],
   ['eye', 'Website', 'Visual check (AI)', 'AI judges desktop and mobile screenshots against the requirement.', 'Gemini vision'],
   ['gauge', 'Website', 'Speed & Lighthouse', 'Performance, accessibility, best-practice and SEO scores from one Lighthouse run.', 'PageSpeed Insights'],
+  ['code', 'Website', 'Source code delivered', "The site's code must arrive as a pull request in the buyer's repo. The commit that passes is saved, so the buyer owns that exact version.", 'GitHub REST API'],
 ];
 
 export default function Landing() {

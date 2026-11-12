@@ -197,3 +197,49 @@ export async function checkCodeJob(job, { timedOut = false, onPending } = {}) {
     return unsureAll(`Could not check the pull request: ${err.message}`);
   }
 }
+
+// ---------- website jobs: the source code PR ----------
+
+/**
+ * "source_delivered" item of a website job: the site's source code must be a PR in the buyer's repo.
+ * PASS when the PR is in job.repoUrl, is open or merged, and changes at least one file.
+ * Returns { result, sha }: sha = the PR's head commit that was checked (the version the buyer gets), or null.
+ * Never throws.
+ * @param {object} job  needs: repoUrl, sourcePrUrl
+ */
+export async function checkSourcePr(job, item, idx) {
+  const done = (status, reasoning, logUrl = null, confidence = 1.0, sha = null) =>
+    ({ result: result(item, idx, status, reasoning, logUrl, confidence), sha });
+
+  if (!job.repoUrl) return done('UNSURE', 'This job has no GitHub repo, so there is no source code to check.', null, 0);
+  if (!job.sourcePrUrl) return done('FAIL', 'No pull request with the source code was submitted.');
+  const pr = parsePrUrl(job.sourcePrUrl);
+  if (!pr || repoKey(job.repoUrl) !== `${pr.owner}/${pr.repo}`.toLowerCase()) {
+    return done('FAIL', `The pull request is not in the buyer's repo (${job.repoUrl}).`);
+  }
+  const name = `${pr.owner}/${pr.repo}`;
+  const prLink = `https://github.com/${name}/pull/${pr.number}`;
+
+  let data;
+  try {
+    data = await gh(`/repos/${name}/pulls/${pr.number}`);
+  } catch (err) {
+    if (/not found/i.test(err.message)) return done('FAIL', `Pull request #${pr.number} does not exist in ${name} (or the repo is private).`, prLink);
+    return done('UNSURE', `Could not check the pull request: ${err.message}`, prLink, 0);
+  }
+
+  if (data.state === 'closed' && !data.merged_at) {
+    return done('FAIL', `Pull request #${pr.number} was closed without being merged, so the code was not delivered.`, prLink);
+  }
+  if (!data.changed_files) return done('FAIL', `Pull request #${pr.number} does not change any files.`, prLink);
+
+  const sha = data.head.sha;
+  return done(
+    'PASS',
+    `Pull request #${pr.number} in ${name}${data.merged_at ? ' (merged)' : ''} changes ${data.changed_files} file(s). ` +
+      `Commit ${sha.slice(0, 7)} is the version that was checked, saved for the buyer.`,
+    `https://github.com/${name}/tree/${sha}`, // GitHub keeps this commit even if the branch is deleted later
+    1.0,
+    sha,
+  );
+}

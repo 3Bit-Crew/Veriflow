@@ -11,6 +11,7 @@ export const ALLOWED_KINDS = {
     "speed_score",
     "interaction",
     "lighthouse_score",
+    "source_delivered",
   ],
 };
 
@@ -109,9 +110,42 @@ function addTestProtection(items) {
   return [items[0], item, ...items.slice(1)];
 }
 
+// Website jobs: the site's source code must arrive as a PR in the buyer's repo (so the buyer
+// owns the code, not only a link). The AI never writes this item; it's always added here.
+export const SOURCE_ITEM_TEXT =
+  "The source code is delivered as a pull request to your GitHub repo";
+function addSourceItem(items) {
+  const rest = items.filter((i) => i.kind !== "source_delivered");
+  const item = { text: SOURCE_ITEM_TEXT, kind: "source_delivered", params: {}, weight: 10 };
+  // Second place, after the main "page loads" item; keep within MAX_ITEMS.
+  return [...rest.slice(0, 1), item, ...rest.slice(1)].slice(0, MAX_ITEMS);
+}
+
 const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
 const cleanPathList = (list) =>
   Array.isArray(list) ? list.filter(isNonEmptyString).map((p) => p.trim()) : [];
+
+// A page inside the submitted site: "/jobs/new", or a full URL cut down to its path. Anything else -> "/".
+export function cleanPagePath(v) {
+  if (!isNonEmptyString(v)) return "/";
+  let s = v.trim();
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      s = u.pathname + u.search;
+    } catch {
+      return "/";
+    }
+  }
+  if (!s.startsWith("/") && !/^[a-z][\w+.-]*:/i.test(s)) s = `/${s}`; // "jobs/new" → "/jobs/new"
+  // "/http://other-site" would make the checker leave the site.
+  return s.startsWith("/") && !/^\/*[a-z][\w+.-]*:/i.test(s) ? s : "/";
+}
+// Only store a path when it isn't the submitted page itself.
+const withPath = (params, raw) => {
+  const path = cleanPagePath(raw);
+  return path === "/" ? params : { ...params, path };
+};
 
 // Returns cleaned params for a kind, or null if the params can't be used.
 function cleanParams(kind, params = {}) {
@@ -126,18 +160,15 @@ function cleanParams(kind, params = {}) {
       return { mustTouch, mustNotTouch };
     }
     case "page_loads":
-      return {
-        path:
-          isNonEmptyString(p.path) && p.path.startsWith("/")
-            ? p.path.trim()
-            : "/",
-      };
+      return { path: cleanPagePath(p.path) };
+    case "source_delivered":
+      return {};
     case "element_exists":
       return isNonEmptyString(p.selector)
-        ? { selector: p.selector.trim() }
+        ? withPath({ selector: p.selector.trim() }, p.path)
         : null;
     case "text_present":
-      return isNonEmptyString(p.text) ? { text: p.text.trim() } : null;
+      return isNonEmptyString(p.text) ? withPath({ text: p.text.trim() }, p.path) : null;
     case "visual":
       return { viewport: p.viewport === "desktop" ? "desktop" : "mobile" };
     case "speed_score": {
@@ -158,10 +189,13 @@ function cleanParams(kind, params = {}) {
     case "interaction":
       // steps = what a user does first, in plain English ("Paste a long link and click Shrink It").
       return isNonEmptyString(p.steps)
-        ? {
-            steps: p.steps.trim().slice(0, MAX_STEPS_TEXT),
-            viewport: p.viewport === "mobile" ? "mobile" : "desktop",
-          }
+        ? withPath(
+            {
+              steps: p.steps.trim().slice(0, MAX_STEPS_TEXT),
+              viewport: p.viewport === "mobile" ? "mobile" : "desktop",
+            },
+            p.path,
+          )
         : null;
     default:
       return null;
@@ -215,8 +249,8 @@ function defaultItems(type) {
  * @param {Array<{text, kind, params, weight}>} items
  * @returns {Array<{text, kind, params, weight, status}>}
  */
-export function validateAndFixItems(type, items) {
-  const allowed = allowedKinds(type);
+export function validateAndFixItems(type, items, { addSource = type === "website" } = {}) {
+  const allowed = allowedKinds(type).filter((k) => k !== "source_delivered"); // only added by addSourceItem
   if (!allowed) throw new Error(`Unknown job type: ${type}`);
 
   let cleaned = (Array.isArray(items) ? items : [])
@@ -266,6 +300,7 @@ export function validateAndFixItems(type, items) {
 
   cleaned = cleaned.slice(0, MAX_ITEMS);
   if (cleaned.length === 0) cleaned = defaultItems(type);
+  if (type === "website" && addSource) cleaned = addSourceItem(cleaned);
 
   const weights = normalizeWeights(cleaned.map((i) => i.weight));
   return cleaned.map((item, idx) => ({

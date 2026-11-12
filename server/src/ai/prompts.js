@@ -4,7 +4,7 @@ import { interactionEnabled } from './checklistRules.js';
 const INTERACTION_HELP = `
 - "interaction": something that only happens AFTER a user types or clicks (a result appears, a form submits, a menu opens).
   An AI opens the site, does the steps like a user, then judges a screenshot of the result.
-  params: { "steps": "Paste a long link into the URL box and click the Shrink button", "viewport": "desktop" }
+  params: { "steps": "Paste a long link into the URL box and click the Shrink button", "viewport": "desktop", "path": "/" }
   "steps" = what the user does, in plain English, using the words a user sees on the page. The item's "text" = what must be true afterwards.`;
 
 const KIND_HELP = {
@@ -14,9 +14,9 @@ const KIND_HELP = {
   params: { "mustTouch": ["src/login.js"], "mustNotTouch": ["src/db/"] }  (a path ending in "/" means a whole folder)`,
   website: () => `
 - "page_loads": a page returns HTTP 200. params: { "path": "/" }
-- "element_exists": a CSS selector is present when the page first loads. params: { "selector": "input[type=email]" }
-- "text_present": some visible text is on the page when it first loads. params: { "text": "Sign up" }
-- "visual": a subjective look-and-feel requirement judged from a screenshot of the page as it first loads. params: { "viewport": "mobile" } or { "viewport": "desktop" }
+- "element_exists": a CSS selector is present when the page first loads. params: { "selector": "input[type=email]", "path": "/" }
+- "text_present": some visible text is on the page when it first loads. params: { "text": "Sign up", "path": "/" }
+- "visual": a subjective look-and-feel requirement judged from a screenshot of the submitted page (path "/" only) as it first loads. params: { "viewport": "mobile" } or { "viewport": "desktop" }
 - "speed_score": Google PageSpeed performance score at least min. params: { "min": 80 }
 - "lighthouse_score": a Google Lighthouse score at least min, for ONE of these categories:
   "accessibility" (works with screen readers, readable contrast, labelled fields), "best-practices" (HTTPS, no errors), "seo" (findable on Google: title, description).
@@ -30,6 +30,9 @@ function websiteRules() {
     : 'Anything that only appears after the user types or clicks can only be judged by a person: use a "visual" item for it.';
   return `6. Never invent CSS class names or ids: you have not seen the site's code. Use "element_exists" only for standard HTML (like input[type=email], form, img, nav) or a selector written in the description. Otherwise use "text_present" or "visual".
 7. ${afterAction}
+8. "text_present" matches part of the page text, so keep "text" SHORT: one or two words the page must show, taken from the description (e.g. "Code", not "Code job option"). If the description quotes the text, use the quote exactly.
+9. "path" = which page of the site the item checks. "/" is the page the worker submits. If the description names another page (a path like "/jobs/new" or a full URL), set "path" to that page's path, for example "/jobs/new", on EVERY item about that page. Never put a full URL in "path".
+10. Do not add items about the GitHub repo, pull request or source code: Veriflow adds that check itself.
 `;
 }
 

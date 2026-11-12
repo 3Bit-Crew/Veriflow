@@ -32,12 +32,13 @@ const EXAMPLES = {
   website: {
     title: 'Bakery landing page',
     description: 'Landing page for my bakery with the headline "Fresh every morning", a signup form with an email field and a "Sign up" button. Signing up shows a thank-you message. Must look good on mobile.',
+    repoUrl: 'https://github.com/3Bit-Crew/veriflow-demo-site',
   },
 };
 
 const TYPES = [
   { value: 'code', icon: 'code', title: 'Code', text: 'GitHub pull request, checked by tests and diffs' },
-  { value: 'website', icon: 'globe', title: 'Website', text: 'Live URL, checked in a real browser' },
+  { value: 'website', icon: 'globe', title: 'Website', text: 'Live URL in a real browser, code as a PR' },
 ];
 
 // Which step a job is on, from its status (PLAN.md 5.1).
@@ -243,11 +244,9 @@ function Receipt({ job, values, items, ready }) {
         </div>
       )}
       <div style={{ marginTop: 18 }}>
-        <div className="receipt__line"><span>Type</span><span>{type === 'code' ? 'Code · PR' : 'Website · URL'}</span></div>
+        <div className="receipt__line"><span>Type</span><span>{type === 'code' ? 'Code · PR' : 'Website · URL + code'}</span></div>
         <div className="receipt__line"><span>Worker</span><span title={source.workerEmail}>{source.workerEmail || '—'}</span></div>
-        {type === 'code' && (
-          <div className="receipt__line"><span>Repo</span><span>{repo.replace('https://github.com/', '') || '—'}</span></div>
-        )}
+        <div className="receipt__line"><span>Repo</span><span>{repo.replace('https://github.com/', '') || '—'}</span></div>
         <div className="receipt__line">
           <span>Checklist</span>
           <span>{list.length ? `${list.length} items · ${total}%` : '—'}</span>
@@ -309,15 +308,15 @@ function JobDetailsForm({ values, setValues, onSubmit }) {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
-    const { repoUrl, ...rest } = values;
     const job = {
-      ...rest,
-      title: rest.title.trim(),
-      description: rest.description.trim(),
-      workerEmail: rest.workerEmail.trim(),
-      amount: Number(rest.amount),
+      ...values,
+      title: values.title.trim(),
+      description: values.description.trim(),
+      workerEmail: values.workerEmail.trim(),
+      amount: Number(values.amount),
+      // Both types need the buyer's repo: code jobs get their PR there, website jobs the site's source code (PLAN.md 13.5).
+      repoUrl: values.repoUrl.trim().replace(/\/$/, ''),
     };
-    if (values.type === 'code') job.repoUrl = repoUrl.trim().replace(/\/$/, '');
     try {
       await onSubmit(job);
     } catch (err) {
@@ -374,28 +373,32 @@ function JobDetailsForm({ values, setValues, onSubmit }) {
         </div>
       </div>
 
-      {values.type === 'code' && (
-        <div className="fade">
-          <label className="label" htmlFor="repoUrl">GitHub repo</label>
-          <input
-            id="repoUrl"
-            className="input mono"
-            style={{ fontSize: 13 }}
-            type="url"
-            required
-            inputMode="url"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck="false"
-            pattern="https://github\.com/[^\/\s]+/[^\/\s]+/?"
-            title="A repo URL like https://github.com/owner/repo"
-            value={values.repoUrl}
-            onChange={set('repoUrl')}
-            placeholder="https://github.com/owner/repo"
-          />
-          <div className="hint">Needs a GitHub Actions workflow that runs on pull requests.</div>
+      {/* Both types (PLAN.md 13.5): code jobs get their pull request here, website jobs the site's source code. */}
+      <div>
+        <label className="label" htmlFor="repoUrl">GitHub repo</label>
+        <input
+          id="repoUrl"
+          className="input mono"
+          style={{ fontSize: 13 }}
+          type="url"
+          required
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck="false"
+          pattern="https://github\.com/[^\/\s]+/[^\/\s]+/?"
+          title="A repo URL like https://github.com/owner/repo"
+          value={values.repoUrl}
+          onChange={set('repoUrl')}
+          placeholder="https://github.com/owner/repo"
+          aria-describedby="repoUrl-hint"
+        />
+        <div className="hint" id="repoUrl-hint">
+          {values.type === 'code'
+            ? 'Needs a GitHub Actions workflow that runs on pull requests.'
+            : "Your GitHub repo. The worker delivers the website's source code here as a pull request."}
         </div>
-      )}
+      </div>
 
       <div className="row2">
         <div className="field--narrow">

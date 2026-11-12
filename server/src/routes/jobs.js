@@ -5,7 +5,7 @@ import { logEvent } from '../events.js';
 import { settleJob, roundDown2 } from '../paypal/settle.js';
 import {
   httpError, findJobOr404, requireStatus,
-  validateNewJob, validateChecklist, validateSubmissionUrl
+  validateNewJob, validateChecklist, validateSubmissionUrl, validateSourcePrUrl
 } from '../validate.js';
 
 const router = Router();
@@ -89,22 +89,31 @@ router.post('/:id/submit', async (req, res) => {
   requireStatus(job, 'FUNDED', 'CHANGES_REQUESTED');
 
   const url = validateSubmissionUrl(job, req.body?.submissionUrl);
+  // Website jobs with a repo also deliver the source code as a PR there (older jobs without a repo: URL only)
+  const sourcePr = job.type === 'website' && job.repoUrl ? validateSourcePrUrl(job, req.body?.sourcePrUrl) : null;
   const isRetry = job.status === 'CHANGES_REQUESTED';
 
-  job.submissionUrl = url;
-  for (const item of job.items) {
-    item.status = 'PENDING';
-    item.confidence = undefined;
-    item.reasoning = undefined;
-    item.evidence = undefined;
-  }
-  // Count the try here, once per submit. The checker loop must not count it: a server restart
-  // would make it re-check this try and count it again (PLAN.md 5.5 uses attempts for the payout).
-  job.attempts = (job.attempts || 0) + 1;
-  job.status = 'SUBMITTED';
-  await job.save();
-  await logEvent(job._id, 'WORK_SUBMITTED', `Worker ${isRetry ? 'resubmitted' : 'submitted'} ${url}`, { submissionUrl: url });
-  res.json(job);
+  // One atomic update that only applies if the job is STILL in the status we checked above.
+  // Two submits at once (double click, slow network retry) can't both win, and a submit can't
+  // overwrite a job the checker loop has already claimed (CHECKING).
+  const update = {
+    $set: { submissionUrl: url, status: 'SUBMITTED', 'items.$[].status': 'PENDING' },
+    $unset: {
+      sourceCommit: '', // set again by the checker for this try
+      'items.$[].confidence': '', 'items.$[].reasoning': '', 'items.$[].evidence': ''
+    },
+    // Count the try here, once per submit. The checker loop must not count it: a server restart
+    // would make it re-check this try and count it again (PLAN.md 5.5 uses attempts for the payout).
+    $inc: { attempts: 1 }
+  };
+  if (sourcePr) update.$set.sourcePrUrl = sourcePr;
+  const updated = await Job.findOneAndUpdate({ _id: job._id, status: job.status }, update, { returnDocument: 'after' });
+  if (!updated) throw httpError(409, 'This job changed while you were submitting (maybe it was already submitted). Reload the page.');
+
+  await logEvent(job._id, 'WORK_SUBMITTED',
+    `Worker ${isRetry ? 'resubmitted' : 'submitted'} ${url}${sourcePr ? ` with the source code in ${sourcePr}` : ''}`,
+    { submissionUrl: url, ...(sourcePr && { sourcePrUrl: sourcePr }) });
+  res.json(updated);
 });
 
 // POST /api/jobs/:id/review  -> a human decides the payout (status SETTLED)

@@ -200,7 +200,7 @@ const JobSchema = new Schema({
   title:         { type: String, required: true },
   description:   { type: String, required: true }, // buyer's plain-English request
   type:          { type: String, enum: ['code', 'website'], required: true },
-  repoUrl:       String,                            // code jobs only: https://github.com/owner/repo
+  repoUrl:       String,                            // buyer's repo, https://github.com/owner/repo (required for code AND website jobs, 13.5)
   amount:        { type: Number, required: true },  // e.g. 200 (USD)
   currency:      { type: String, default: 'USD' },
   buyerEmail:    String,                            // sandbox personal account
@@ -209,6 +209,8 @@ const JobSchema = new Schema({
   paypalOrderId: String,
   paypalAuthId:  String,
   submissionUrl: String,                            // PR URL (code) or website URL (website)
+  sourcePrUrl:   String,                            // website jobs: PR in repoUrl with the site's source code (13.5)
+  sourceCommit:  String,                            // website jobs: the PR commit that was checked = what the buyer gets (13.5)
   attempts:      { type: Number, default: 0 },      // how many times the worker submitted (set by POST /submit)
   payoutAmount:  Number,                            // set when SETTLED
   settlement:    { type: String, enum: ['FULL', 'PARTIAL', 'VOID'] }, // set when SETTLED. The rule (5.5) gives only FULL or VOID; PARTIAL only comes from a human review payout
@@ -248,6 +250,7 @@ The AI may **only** use kinds allowed for the job's type. A's `PUT /checklist` r
 | `speed_score` | website | `{ "min": 80 }` | PageSpeed Insights API | Should |
 | `interaction` | website | `{ "steps": "Paste a long link and click Shrink It", "viewport": "desktop" }` (`viewport`: `desktop` or `mobile`; steps ≤ 300 characters) | Playwright + AI: plans clicks/typing, does them, judges before/after screenshots | Added Nov 11 (section 13.1) |
 | `lighthouse_score` | website | `{ "category": "accessibility", "min": 90 }` (category: `accessibility`, `best-practices` or `seo`) | PageSpeed Insights API (Lighthouse) | Added Nov 11 (section 13.2) |
+| `source_delivered` | website | `{}` | GitHub API: the source code PR is in the buyer's repo, open or merged, changes files | Added Nov 12 (section 13.5). Added automatically, never by the AI or the buyer, and can't be removed |
 
 **Rules:**
 - Use an exact check whenever possible. Use `visual` only for things like "looks good on mobile" or "matches the brand colors".
@@ -319,19 +322,19 @@ A "job object" means the full `Job` document including `items`.
 
 | Method | Path | Request body | Response | Allowed when status is |
 |---|---|---|---|---|
-| `POST` | `/api/jobs` | `{ title, description, type, amount, workerEmail, repoUrl? }` | job object | any |
+| `POST` | `/api/jobs` | `{ title, description, type, amount, workerEmail, repoUrl }` (`repoUrl` required for both types) | job object | any |
 | `POST` | `/api/jobs/:id/checklist` | `{}` | job object, with AI items (status stays `DRAFT`) | `DRAFT` |
 | `PUT` | `/api/jobs/:id/checklist` | `{ items: [{ text, kind, params, weight }] }` | job object, status `CHECKLIST_READY` | `DRAFT` |
 | `POST` | `/api/paypal/orders` | `{ jobId }` | `{ orderId }` | `CHECKLIST_READY` |
 | `POST` | `/api/paypal/orders/:orderId/authorize` | `{ jobId }` | job object, status `FUNDED` | `CHECKLIST_READY` |
-| `POST` | `/api/jobs/:id/submit` | `{ submissionUrl }` | job object, status `SUBMITTED`, all items reset to `PENDING` | `FUNDED` or `CHANGES_REQUESTED` |
+| `POST` | `/api/jobs/:id/submit` | `{ submissionUrl, sourcePrUrl? }` (`sourcePrUrl` required for website jobs) | job object, status `SUBMITTED`, all items reset to `PENDING` | `FUNDED` or `CHANGES_REQUESTED` |
 | `POST` | `/api/jobs/:id/review` | `{ payoutAmount }` (0 to job amount; the app sends only 0 or the full amount, see 5.5) | job object, status `SETTLED` | `NEEDS_REVIEW` |
 | `GET` | `/api/jobs` | none | `[job object, ...]` newest first | any |
 | `GET` | `/api/jobs/:id` | none | `{ job, events: [...] }` | any |
 | `GET` | `/api/events` | none | `[event, ...]` newest first, each with `jobTitle` added | any |
 | `GET` | `/api/screenshots/:id` | none | the JPEG image | any |
 
-**Submit route checks:** for code jobs, `submissionUrl` must be a PR in the job's `repoUrl` (`https://github.com/owner/repo/pull/123`). For website jobs, it must start with `http`.
+**Submit route checks:** for code jobs, `submissionUrl` must be a PR in the job's `repoUrl` (`https://github.com/owner/repo/pull/123`). For website jobs, it must start with `http`, and `sourcePrUrl` must be a PR in the job's `repoUrl` (13.5). Older website jobs without a repo only need the URL.
 
 **Worker email check (`POST /api/jobs`):** when the server has `PAYPAL_WORKER_EMAIL` set (it is on Render), `workerEmail` must be exactly that address, or the route returns 400 with a message naming it. **Why:** PayPal only lets our app void a hold whose payee is the sandbox business account that owns the app. With any other worker, a job that fails could never give the buyer's money back. Our worker account is `sb-m8uku53787938@business.example.com`.
 
@@ -701,6 +704,7 @@ The buyer's 6 tests:
 - **Broken version:** `https://3bit-crew.github.io/veriflow-demo-site/broken/`. The "Sign up" button is cut off at the right edge on a 390px phone screen, so the AI vision check flags it. On desktop it looks the same as the good one.
 - Job description to type (type Website): *Landing page for my bakery with the headline "Fresh every morning", a signup form with an email field and a "Sign up" button. Signing up shows a thank-you message. Must look good on mobile.*
 - Details and what each check should find: `demo/README.md`.
+- **Source code (13.5):** the website demo job uses the repo `https://github.com/3Bit-Crew/veriflow-demo-site`. Open a PR there before recording and submit it together with the site URL.
 
 ### 10.2 Before recording
 - [ ] Tell the team you're recording. **Nobody pushes to `main`** until you say you're done (8.5).
@@ -838,6 +842,26 @@ Free limit: about 25,000 checks a day.
 | `CHECKER_LOOP` | `true` (laptops: `false`) | K | Set |
 
 ---
+
+### 13.5 Website jobs deliver the source code (Nov 12)
+**Why:** before, a website job delivered only a link. After paying, the buyer had no code, and the worker could take the site down. Now the site's source code must arrive as a **pull request in the buyer's own GitHub repo**, and Veriflow saves the exact commit that was checked and paid for.
+
+**How it works**
+1. Website jobs **require** `repoUrl` (the buyer's repo), like code jobs. The buyer adds the worker as a collaborator, or the worker opens the PR from a fork.
+2. Every website checklist gets an automatic item, **"The source code is delivered as a pull request to your GitHub repo"** (`source_delivered`, weight 10, second place). The approve route rejects a website checklist without exactly one.
+3. The worker submits **two links**: `submissionUrl` (the live site) and `sourcePrUrl` (the PR in the buyer's repo).
+4. The checker (`checkSourcePr` in `checkers/github.js`): PR in the job's repo, not closed without merging, changes at least one file → PASS, and the PR's head commit is saved as `job.sourceCommit`. A missing, closed or wrong-repo PR → FAIL, so all-or-nothing (5.5) applies.
+5. The buyer can always get that version, even if the worker deletes the branch later: `https://github.com/<owner>/<repo>/tree/<sourceCommit>` or the ZIP `https://github.com/<owner>/<repo>/archive/<sourceCommit>.zip`.
+
+**Not checked:** that the live site was built from that PR. Future work: a per-job code that must appear on the site and in the PR.
+
+**Work**
+- [x] **K's files (done by M, with the user's OK):** `models/Job.js` (`sourcePrUrl`, `sourceCommit`), `validate.js` (repo required for website jobs, `validateSourcePrUrl`, `source_delivered` rule, approve needs the item), `routes/jobs.js` (submit takes `sourcePrUrl`, clears `sourceCommit`).
+- [x] **M:** `checkSourcePr` in `checkers/github.js`, website branch of `checkers/loop.js`, automatic item in `ai/checklistRules.js`, prompt rule, `scripts/test-source-pr.js`, `scripts/test-loop.js`.
+- [x] **H:** New job page: repo field for website jobs too. Submit page: second field for the PR. `api.js`: `submitWork(id, submissionUrl, sourcePrUrl)`. Job page: show the PR, and after payout a **"Get the code"** link (commit + ZIP) from `job.sourceCommit`. `checklistKinds.js`: label and icon for `source_delivered`. Checklist editor: the item can't be deleted. Also: sample-data mode follows the same rules, the landing page lists the check, and "Get the code" is not shown on a voided job (nothing was bought).
+- [ ] **Demo:** open PRs in `3Bit-Crew/veriflow-demo-site` (e.g. one per version) before recording, and use that repo for the website demo job. Planned: #1 `site-broken`, #2 `site-good` (demo/README.md).
+
+**Deploy order:** the backend makes the repo and the PR **required**, so the live site can't create or submit website jobs until H's part is live. Merge both together, before the freeze and before recording.
 
 ## 14. Future scope (after the hackathon): a hybrid payout rule
 

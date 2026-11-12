@@ -364,6 +364,7 @@ function Vault({ job, events, reviewed, countUp, onSettled }) {
         )}
       </div>
 
+      {settled && !voided && job.sourceCommit && job.repoUrl && <GetCode job={job} />}
       {job.status === 'NEEDS_REVIEW' && <ReviewBox job={job} onSettled={onSettled} />}
       {(job.status === 'FUNDED' || job.status === 'CHANGES_REQUESTED') && <WorkerLink job={job} />}
     </div>
@@ -439,6 +440,38 @@ function voidReason(job, reviewed, backText) {
   return `The work didn't pass any checks, so ${backText} went back to the buyer.`;
 }
 
+const shortSha = (sha) => sha.slice(0, 7);
+const repoPath = (url) => url.replace('https://github.com/', '');
+
+// Website jobs (PLAN.md 13.5): after a payout, the exact commit that passed. GitHub keeps
+// that commit even if the worker deletes their branch later. Not shown on a voided job:
+// nothing was bought.
+function GetCode({ job }) {
+  const tree = `${job.repoUrl}/tree/${job.sourceCommit}`;
+  const zip = `${job.repoUrl}/archive/${job.sourceCommit}.zip`;
+  return (
+    <div className="review get-code">
+      <div className="get-code__text">
+        <span className="eyebrow">Get the code</span>
+        <p>
+          The exact version that passed is saved: commit <span className="mono get-code__sha">{shortSha(job.sourceCommit)}</span> in{' '}
+          {repoPath(job.repoUrl)}.
+        </p>
+      </div>
+      <div className="get-code__actions">
+        <a className="btn btn--on-dark" href={tree} target="_blank" rel="noreferrer">
+          <Icon name="ext" size={14} />
+          Browse the code
+        </a>
+        <a className="btn btn--lime" href={zip}>
+          <Icon name="download" size={14} />
+          Download ZIP
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // The link the buyer sends to the worker. Work is only submitted on that page, never here.
 function WorkerLink({ job }) {
   const [copied, setCopied] = useState(false);
@@ -480,7 +513,7 @@ function Details({ job }) {
   const rows = [
     ['Amount', `${formatMoney(job.amount, job.currency)} ${job.currency || 'USD'}`],
     ['Worker', job.workerEmail],
-    job.repoUrl && ['Repo', job.repoUrl.replace('https://github.com/', '')],
+    job.repoUrl && ['Repo', repoPath(job.repoUrl)],
     [
       'Submission',
       job.submissionUrl ? (
@@ -488,6 +521,14 @@ function Details({ job }) {
       ) : (
         '—'
       ),
+    ],
+    job.sourcePrUrl && [
+      'Source code',
+      <a href={job.sourcePrUrl} target="_blank" rel="noreferrer">{`Pull request #${job.sourcePrUrl.split('/pull/')[1]}`}</a>,
+    ],
+    job.sourceCommit && job.repoUrl && [
+      'Checked commit',
+      <a href={`${job.repoUrl}/tree/${job.sourceCommit}`} target="_blank" rel="noreferrer">{shortSha(job.sourceCommit)}</a>,
     ],
     ['PayPal order', job.paypalOrderId || '—'],
     job.paypalAuthId && ['Authorization', job.paypalAuthId],
