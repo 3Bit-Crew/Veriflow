@@ -19,7 +19,7 @@ Veriflow holds a freelance payment on **PayPal**, checks the submitted **GitHub 
 
 <br />
 
-<img src="docs/screenshots/landing-hero.png" alt="Veriflow landing page: 'Money moves only when the work is proven', next to a $200 escrow card where every checklist item has passed and PayPal has released the payment to the worker" width="100%" />
+<img src="docs/screenshots/landing-hero.png" alt="Veriflow landing page: 'Money moves only when the work is proven', next to a $200 escrow card for a bakery landing page job being checked on try 1 of 2, with 2 of 4 checklist items passed so far and the PayPal capture still pending" width="100%" />
 
 </div>
 
