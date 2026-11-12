@@ -32,6 +32,7 @@ function websiteRules() {
 7. ${afterAction}
 8. "text_present" matches part of the page text, so keep "text" SHORT: one or two words the page must show, taken from the description (e.g. "Code", not "Code job option"). If the description quotes the text, use the quote exactly.
 9. "path" = which page of the site the item checks. "/" is the page the worker submits. If the description names another page (a path like "/jobs/new" or a full URL), set "path" to that page's path, for example "/jobs/new", on EVERY item about that page. Never put a full URL in "path".
+10. Do not add items about the GitHub repo, pull request or source code: Veriflow adds that check itself.
 `;
 }
 

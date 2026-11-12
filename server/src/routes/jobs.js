@@ -5,7 +5,7 @@ import { logEvent } from '../events.js';
 import { settleJob, roundDown2 } from '../paypal/settle.js';
 import {
   httpError, findJobOr404, requireStatus,
-  validateNewJob, validateChecklist, validateSubmissionUrl
+  validateNewJob, validateChecklist, validateSubmissionUrl, validateSourcePrUrl
 } from '../validate.js';
 
 const router = Router();
@@ -89,9 +89,13 @@ router.post('/:id/submit', async (req, res) => {
   requireStatus(job, 'FUNDED', 'CHANGES_REQUESTED');
 
   const url = validateSubmissionUrl(job, req.body?.submissionUrl);
+  // Website jobs with a repo also deliver the source code as a PR there (older jobs without a repo: URL only)
+  const sourcePr = job.type === 'website' && job.repoUrl ? validateSourcePrUrl(job, req.body?.sourcePrUrl) : null;
   const isRetry = job.status === 'CHANGES_REQUESTED';
 
   job.submissionUrl = url;
+  if (sourcePr) job.sourcePrUrl = sourcePr;
+  job.sourceCommit = undefined; // set again by the checker for this try
   for (const item of job.items) {
     item.status = 'PENDING';
     item.confidence = undefined;
@@ -103,7 +107,9 @@ router.post('/:id/submit', async (req, res) => {
   job.attempts = (job.attempts || 0) + 1;
   job.status = 'SUBMITTED';
   await job.save();
-  await logEvent(job._id, 'WORK_SUBMITTED', `Worker ${isRetry ? 'resubmitted' : 'submitted'} ${url}`, { submissionUrl: url });
+  await logEvent(job._id, 'WORK_SUBMITTED',
+    `Worker ${isRetry ? 'resubmitted' : 'submitted'} ${url}${sourcePr ? ` with the source code in ${sourcePr}` : ''}`,
+    { submissionUrl: url, ...(sourcePr && { sourcePrUrl: sourcePr }) });
   res.json(job);
 });
 

@@ -13,7 +13,7 @@ import Screenshot from '../models/Screenshot.js';
 import { logEvent } from '../events.js';
 import { settleJob } from '../paypal/settle.js';
 import { decide } from '../decision.js';
-import { checkCodeJob } from './github.js';
+import { checkCodeJob, checkSourcePr } from './github.js';
 import { checkWebsiteJob } from './website.js';
 import { checkVisualItems } from './visual.js';
 import { checkSpeedItems } from './speed.js';
@@ -43,7 +43,16 @@ async function runCheckers(job, { onPending } = {}) {
     return checkCodeJob(job, { timedOut, onPending });
   }
 
-  // Website job: Playwright first (screenshots + interaction items), then AI on the screenshots, then speed.
+  // Website job: the source code PR (quick GitHub call), then Playwright (screenshots + interaction
+  // items), then AI on the screenshots, then speed.
+  const source = [];
+  for (const [idx, item] of job.items.entries()) {
+    if (item.kind !== 'source_delivered') continue;
+    const { result, sha } = await checkSourcePr(job, item, idx);
+    source.push(result);
+    job.sourceCommit = sha ?? undefined; // saved with the results: the exact version the buyer gets
+  }
+
   const { results, screenshots, interactions = [] } = await checkWebsiteJob(job);
 
   const ids = {};
@@ -73,7 +82,7 @@ async function runCheckers(job, { onPending } = {}) {
     const doc = await Screenshot.create({ jobId: job._id, viewport, data: shot });
     result.evidence.screenshots = [String(doc._id)];
   }
-  return [...results, ...visual, ...speed, ...interactions.map((i) => i.result)];
+  return [...source, ...results, ...visual, ...speed, ...interactions.map((i) => i.result)];
 }
 
 // Copy results onto the job's items and log one CHECK_RESULT per item.

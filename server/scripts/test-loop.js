@@ -45,8 +45,11 @@ const JOBS = {
     title: '[TEST] Website job',
     type: 'website',
     submissionUrl: 'https://react.dev',
+    repoUrl: 'https://github.com/expressjs/express', // stands in for the buyer's repo
+    sourcePrUrl: 'https://github.com/expressjs/express/pull/7593', // an open PR: the "source code"
     items: [
-      { text: 'Home page loads', kind: 'page_loads', params: { path: '/' }, weight: 40 },
+      { text: 'Home page loads', kind: 'page_loads', params: { path: '/' }, weight: 30 },
+      { text: 'Source code delivered as a pull request', kind: 'source_delivered', params: {}, weight: 10 },
       { text: 'Shows "Learn React"', kind: 'text_present', params: { text: 'Learn React' }, weight: 30 },
       { text: 'Page is readable on a phone, nothing overlapping or cut off', kind: 'visual', params: { viewport: 'mobile' }, weight: 30 },
     ],
